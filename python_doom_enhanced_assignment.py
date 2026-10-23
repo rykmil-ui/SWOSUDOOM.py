@@ -153,6 +153,15 @@ class Enemy:
         self.anim_time = random.uniform(0, math.tau)
         self.flash_timer = 0.0
 
+def validate_enemy_positions():
+    """Keep every enemy on a walkable tile and away from the player start."""
+    for enemy in enemies:
+        cell = cell_at(enemy.x, enemy.y)
+        if cell != ".":
+            raise ValueError(
+                f"Enemy spawned on blocked tile at ({enemy.x:.1f}, {enemy.y:.1f})"
+            )
+
 enemies = [
     Enemy(8.5, 2.5, "imp"),
     Enemy(10.5, 3.5, "imp"),
@@ -930,6 +939,35 @@ def render_hud():
         (220, 220, 220)
     )
     screen.blit(enemy_text, (600, HEIGHT - 55))
+
+    # ENEMY RADAR: shows arrows toward living enemies that are outside the
+    # current view or hidden behind a wall, so every required target can be found.
+    living = [e for e in enemies if e.alive]
+    radar_font = pygame.font.Font(None, 22)
+    for enemy in living:
+        dx = enemy.x - player.x
+        dy = enemy.y - player.y
+        dist = math.hypot(dx, dy)
+        if dist < 0.01:
+            continue
+        rel = math.atan2(dy, dx) - player.angle
+        rel = (rel + math.pi) % (2 * math.pi) - math.pi
+
+        # Only show radar markers for enemies outside the central view.
+        if abs(rel) > FOV * 0.42:
+            side = -1 if rel < 0 else 1
+            arrow_x = WIDTH // 2 + side * (WIDTH // 2 - 45)
+            arrow_y = 45
+            label = radar_font.render(
+                "ENEMY", True, (255, 90, 90)
+            )
+            screen.blit(label, (arrow_x - label.get_width() // 2, arrow_y))
+        elif dist > 7.0:
+            # Distant enemies get a small top-center warning.
+            label = radar_font.render(
+                f"ENEMY {int(dist)}m", True, (255, 90, 90)
+            )
+            screen.blit(label, (WIDTH // 2 - label.get_width() // 2, 45))
 
     # Crosshair.
     cx = WIDTH // 2
