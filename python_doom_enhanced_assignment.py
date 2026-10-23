@@ -96,7 +96,7 @@ WEAPON_BOB_SPEED = 9.0
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Python DOOM-Style FPS - Enhanced Level")
+pygame.display.set_caption("Python DOOM-Style FPS - Retro Enhanced Level")
 
 view = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT))
 clock = pygame.time.Clock()
@@ -647,17 +647,30 @@ def cast_ray(angle):
 
 
 def render_world():
-    # Animated atmospheric sky and floor gradient.
+    """Render a deliberately retro, fake-3-D environment.
+
+    The scene is still a simple raycaster, but layered gradients,
+    brick seams, floor perspective marks, flickering lights, and
+    distance fog make it look much closer to a 1990s FPS.
+    """
+    horizon = VIEW_HEIGHT // 2 - int(player.z * 28)
+
+    # Ceiling/floor gradients.
     for y in range(VIEW_HEIGHT):
-        if y < VIEW_HEIGHT // 2:
-            depth = y / max(1, VIEW_HEIGHT // 2)
-            c = int(22 + 18 * depth)
-            pygame.draw.line(view, (c, c, c + 10), (0, y), (VIEW_WIDTH, y))
+        if y < horizon:
+            t = y / max(1, horizon)
+            c = int(10 + 28 * t)
+            pygame.draw.line(view, (c, c, min(70, c + 12)), (0, y), (VIEW_WIDTH, y))
         else:
-            depth = (y - VIEW_HEIGHT // 2) / max(1, VIEW_HEIGHT // 2)
-            c = int(48 - 22 * depth)
-            pygame.draw.line(view, (c + 8, c, max(18, c - 6)),
-                             (0, y), (VIEW_WIDTH, y))
+            t = (y - horizon) / max(1, VIEW_HEIGHT - horizon)
+            c = int(52 - 34 * t)
+            pygame.draw.line(view, (c + 8, c, max(10, c - 7)), (0, y), (VIEW_WIDTH, y))
+
+    # Fake floor perspective lines give the ground a chunky old-school grid.
+    for gy in range(horizon + 8, VIEW_HEIGHT, 10):
+        pygame.draw.line(view, (35, 25, 24), (0, gy), (VIEW_WIDTH, gy), 1)
+    for gx in range(-VIEW_WIDTH, VIEW_WIDTH * 2, 32):
+        pygame.draw.line(view, (38, 27, 25), (VIEW_WIDTH // 2, horizon), (gx, VIEW_HEIGHT), 1)
 
     wall_distances = []
 
@@ -676,39 +689,66 @@ def render_world():
         top = VIEW_HEIGHT // 2 - wall_height // 2 - jump_offset
         bottom = VIEW_HEIGHT // 2 + wall_height // 2 - jump_offset
 
-        shade = max(28, int(225 - corrected_distance * 11))
+        # Distance fog + animated flicker.
+        flicker = int(5 * math.sin(game_time * 5.0 + column * 0.08))
+        shade = max(24, min(220, int(235 - corrected_distance * 12) + flicker))
 
-        # Identify what the ray hit so the red door can be rendered red.
         hit_x = player.x + math.cos(ray_angle) * raw_distance
         hit_y = player.y + math.sin(ray_angle) * raw_distance
         hit_cell = cell_at(hit_x, hit_y)
 
+        # Approximate which side of a map cell was hit so texture seams
+        # don't look like a completely flat wall.
+        fx = hit_x - math.floor(hit_x)
+        fy = hit_y - math.floor(hit_y)
+        side_coord = fy if abs(fx - 0.5) > abs(fy - 0.5) else fx
+        seam = int(side_coord * 12) % 2
+
         if hit_cell == "D":
-            # Bright red metal door with darker distance shading.
-            stripe = 1 if (column // 9) % 2 else 0
+            # Red security door: panels, warning stripes, and a central lock.
+            panel = 12 if (int(side_coord * 6) % 2 == 0) else -4
             wall_color = (
-                min(255, int(shade * 1.05) + 18 * stripe),
-                max(18, int(shade * 0.18)),
-                max(18, int(shade * 0.12))
+                min(255, shade + 30 + panel),
+                max(10, int(shade * 0.16)),
+                max(8, int(shade * 0.10))
             )
         else:
-            # Subtle animated industrial color variation.
-            stripe = 1 if (column // 9) % 2 else 0
+            # Dark industrial stone/metal wall texture.
+            base = shade + (10 if seam else -5)
             wall_color = (
-                min(255, shade + 10 * stripe),
-                max(0, shade - 8),
-                max(0, shade - 15)
+                max(18, min(220, base + 8)),
+                max(16, min(190, base - 5)),
+                max(14, min(170, base - 12))
             )
 
         pygame.draw.line(view, wall_color, (column, top), (column, bottom))
 
-        # Small wall highlights give surfaces more visual structure.
-        if column % 13 == 0 and corrected_distance < 12:
-            pygame.draw.line(
-                view,
-                (min(255, shade + 25), min(255, shade + 18), min(255, shade + 12)),
-                (column, top), (column, bottom), 1
-            )
+        # Horizontal brick/panel seams.
+        if wall_height > 18:
+            segment = max(4, wall_height // 5)
+            for sy in range(top + segment, bottom, segment):
+                if (column // 5 + sy // max(1, segment)) % 3 == 0:
+                    pygame.draw.line(view, (max(12, shade // 3),) * 3,
+                                     (column, sy), (column, min(bottom, sy + 1)))
+
+        # Vertical panel highlight.
+        if column % 17 == 0 and corrected_distance < 13:
+            pygame.draw.line(view,
+                             (min(255, shade + 28), min(240, shade + 20), min(230, shade + 14)),
+                             (column, top), (column, bottom), 1)
+
+        # Red door warning lights.
+        if hit_cell == "D" and column % 16 < 3 and wall_height > 10:
+            light = 120 + int(80 * (0.5 + 0.5 * math.sin(game_time * 7)))
+            pygame.draw.line(view, (light, 15, 10),
+                             (column, top + wall_height // 5),
+                             (column, top + wall_height // 5 + 3), 2)
+
+    # Cross-room atmospheric light shafts. They are intentionally subtle.
+    glow = int(10 + 8 * (0.5 + 0.5 * math.sin(game_time * 3.5)))
+    overlay = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT), pygame.SRCALPHA)
+    pygame.draw.circle(overlay, (120, 35, 20, glow), (VIEW_WIDTH // 2, horizon), 35)
+    view.blit(overlay, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
 
     return wall_distances
 
@@ -898,116 +938,85 @@ def render_shells():
 # ------------------------------------------------------------
 
 def render_weapon():
+    """Draw a chunky, deliberately fake retro first-person weapon."""
     bob_x = int(math.sin(player.bob_time * 1.8) * 5)
     bob_y = int(abs(math.cos(player.bob_time * 1.8)) * 4)
     recoil = int(muzzle_flash_timer * 80)
     center_x = WIDTH // 2 + bob_x
-    base_y = HEIGHT - 30 + bob_y + recoil
+    base_y = HEIGHT - 25 + bob_y + recoil
 
     if muzzle_flash_timer > 0:
         flash_size = 70 + int(muzzle_flash_timer * 220)
-        pygame.draw.polygon(
-            screen, (255, 205, 60),
-            [
-                (center_x, base_y - 145),
-                (center_x - flash_size // 2, base_y - 35),
-                (center_x + flash_size // 2, base_y - 35),
-            ],
-        )
-        pygame.draw.circle(
-            screen, (255, 245, 190),
-            (center_x, base_y - 115),
-            max(7, flash_size // 5)
-        )
+        pygame.draw.polygon(screen, (255, 205, 60), [
+            (center_x, base_y - 155),
+            (center_x - flash_size // 2, base_y - 35),
+            (center_x + flash_size // 2, base_y - 35),
+        ])
+        pygame.draw.polygon(screen, (255, 245, 190), [
+            (center_x, base_y - 142),
+            (center_x - flash_size // 5, base_y - 55),
+            (center_x + flash_size // 5, base_y - 55),
+        ])
 
-    # More detailed homemade sci-fi pistol.
-    pygame.draw.polygon(
-        screen, (28, 28, 32),
-        [
-            (center_x - 48, base_y),
-            (center_x - 30, base_y - 105),
-            (center_x + 25, base_y - 105),
-            (center_x + 45, base_y),
-        ]
-    )
-    pygame.draw.polygon(
-        screen, (75, 75, 82),
-        [
-            (center_x - 17, base_y - 120),
-            (center_x + 17, base_y - 120),
-            (center_x + 25, base_y - 58),
-            (center_x - 25, base_y - 58),
-        ]
-    )
-    pygame.draw.rect(screen, (12, 12, 15),
-                     (center_x - 10, base_y - 140, 20, 30))
-    pygame.draw.rect(screen, (130, 130, 140),
-                     (center_x - 7, base_y - 136, 14, 8))
-    pygame.draw.line(screen, (150, 150, 160),
-                     (center_x - 25, base_y - 80),
-                     (center_x + 25, base_y - 80), 3)
+    # Grip/receiver silhouette.
+    pygame.draw.polygon(screen, (18, 18, 22), [
+        (center_x - 55, base_y), (center_x - 34, base_y - 112),
+        (center_x + 30, base_y - 112), (center_x + 52, base_y)
+    ])
+    pygame.draw.polygon(screen, (70, 70, 78), [
+        (center_x - 22, base_y - 125), (center_x + 22, base_y - 125),
+        (center_x + 29, base_y - 55), (center_x - 29, base_y - 55)
+    ])
+    pygame.draw.rect(screen, (8, 8, 10), (center_x - 12, base_y - 145, 24, 28))
+    pygame.draw.rect(screen, (155, 155, 165), (center_x - 8, base_y - 141, 16, 7))
+    pygame.draw.line(screen, (185, 185, 195), (center_x - 27, base_y - 82),
+                     (center_x + 27, base_y - 82), 3)
 
-    # Small animated weapon light.
-    glow = int(100 + 80 * (0.5 + 0.5 * math.sin(game_time * 8)))
-    pygame.draw.circle(screen, (glow, glow, 40),
-                       (center_x, base_y - 65), 4)
-
-    # Shell ejection is visual only.
+    # Retro green-ish status lights on the weapon.
+    glow = int(90 + 100 * (0.5 + 0.5 * math.sin(game_time * 8)))
+    pygame.draw.circle(screen, (40, glow, 55), (center_x - 17, base_y - 64), 4)
+    pygame.draw.circle(screen, (glow, 55, 35), (center_x + 17, base_y - 64), 4)
 
 
 def render_hud():
-    # Bottom HUD bar.
-    pygame.draw.rect(
-        screen,
-        (15, 15, 18),
-        (0, HEIGHT - 70, WIDTH, 70)
-    )
+    # Top status strip.
+    pygame.draw.rect(screen, (8, 8, 10), (0, 0, WIDTH, 28))
+    pygame.draw.line(screen, (105, 25, 20), (0, 28), (WIDTH, 28), 2)
 
-    health_text = font.render(
-        f"HEALTH: {player.health}",
-        True,
-        (220, 220, 220)
-    )
+    mode_text = font.render(f"MODE: {game_strategy.upper()}", True, (220, 220, 220))
+    objective = "OBJECTIVE: FIND RED KEY" if not player.has_key else "OBJECTIVE: KILL ALL ENEMIES"
+    if player.has_key and living_enemies == 0:
+        objective = "OBJECTIVE: OPEN RED DOOR"
+    objective_text = font.render(objective, True, (230, 180, 80))
+    screen.blit(mode_text, (10, 4))
+    screen.blit(objective_text, (250, 4))
 
-    strategy_text = font.render(
-        f"MODE: {game_strategy.upper()}",
-        True,
-        (220, 220, 220)
-    )
-    screen.blit(strategy_text, (10, HEIGHT - 80))
+    # Bottom HUD bar with beveled-looking separators.
+    pygame.draw.rect(screen, (10, 10, 13), (0, HEIGHT - 78, WIDTH, 78))
+    pygame.draw.line(screen, (115, 115, 125), (0, HEIGHT - 78), (WIDTH, HEIGHT - 78), 2)
+    for x in (200, 400, 600):
+        pygame.draw.line(screen, (55, 55, 62), (x, HEIGHT - 72), (x, HEIGHT - 8), 1)
 
-    ammo_text = font.render(
-        f"AMMO: {player.ammo}",
-        True,
-        (220, 220, 220)
-    )
+    health_text = font.render(f"HEALTH: {player.health}", True, (220, 220, 220))
+    ammo_text = font.render(f"AMMO: {player.ammo}", True, (220, 220, 220))
+    key_text = font.render("RED KEY: YES" if player.has_key else "RED KEY: NO", True, (220, 220, 220))
+    enemy_text = font.render(f"ENEMIES: {living_enemies}", True, (220, 220, 220))
+    threat_text = font.render(f"THREAT: {total_enemy_threat}", True, (220, 220, 220))
 
-    key_text = font.render(
-        "RED KEY: YES" if player.has_key else "RED KEY: NO",
-        True,
-        (220, 220, 220)
-    )
+    screen.blit(health_text, (15, HEIGHT - 58))
+    screen.blit(ammo_text, (215, HEIGHT - 58))
+    screen.blit(key_text, (415, HEIGHT - 58))
+    screen.blit(enemy_text, (615, HEIGHT - 58))
+    screen.blit(threat_text, (615, HEIGHT - 32))
 
-    screen.blit(health_text, (20, HEIGHT - 55))
-    screen.blit(ammo_text, (220, HEIGHT - 55))
-    screen.blit(key_text, (420, HEIGHT - 55))
+    # Health/ammo mini-bars make the HUD feel more game-like.
+    pygame.draw.rect(screen, (35, 35, 38), (15, HEIGHT - 30, 160, 6))
+    pygame.draw.rect(screen, (165, 35, 30), (15, HEIGHT - 30, int(160 * player.health / 100), 6))
+    pygame.draw.rect(screen, (35, 35, 38), (215, HEIGHT - 30, 160, 6))
+    ammo_ratio = min(1.0, player.ammo / max(1, starting_ammo))
+    pygame.draw.rect(screen, (190, 150, 45), (215, HEIGHT - 30, int(160 * ammo_ratio), 6))
 
-    enemy_text = font.render(
-        f"ENEMIES: {living_enemies}",
-        True,
-        (220, 220, 220)
-    )
-    screen.blit(enemy_text, (600, HEIGHT - 55))
-
-    threat_text = font.render(
-        f"THREAT: {total_enemy_threat}",
-        True,
-        (220, 220, 220)
-    )
-    screen.blit(threat_text, (600, HEIGHT - 30))
-
-    # ENEMY RADAR: shows arrows toward living enemies that are outside the
-    # current view or hidden behind a wall, so every required target can be found.
+    # Enemy radar markers.
     living = [e for e in enemies if e.alive]
     radar_font = pygame.font.Font(None, 22)
     for enemy in living:
@@ -1016,88 +1025,62 @@ def render_hud():
         dist = math.hypot(dx, dy)
         if dist < 0.01:
             continue
-        rel = math.atan2(dy, dx) - player.angle
-        rel = (rel + math.pi) % (2 * math.pi) - math.pi
-
-        # Only show radar markers for enemies outside the central view.
+        rel = normalize_angle(math.atan2(dy, dx) - player.angle)
         if abs(rel) > FOV * 0.42:
             side = -1 if rel < 0 else 1
             arrow_x = WIDTH // 2 + side * (WIDTH // 2 - 45)
-            arrow_y = 45
-            label = radar_font.render(
-                "ENEMY", True, (255, 90, 90)
-            )
-            screen.blit(label, (arrow_x - label.get_width() // 2, arrow_y))
+            label = radar_font.render("ENEMY", True, (255, 90, 90))
+            screen.blit(label, (arrow_x - label.get_width() // 2, 40))
         elif dist > 7.0:
-            # Distant enemies get a small top-center warning.
-            label = radar_font.render(
-                f"ENEMY {int(dist)}m", True, (255, 90, 90)
-            )
-            screen.blit(label, (WIDTH // 2 - label.get_width() // 2, 45))
+            label = radar_font.render(f"ENEMY {int(dist)}m", True, (255, 90, 90))
+            screen.blit(label, (WIDTH // 2 - label.get_width() // 2, 40))
 
     # Crosshair.
-    cx = WIDTH // 2
-    cy = HEIGHT // 2
+    cx, cy = WIDTH // 2, HEIGHT // 2
+    pygame.draw.line(screen, (235, 235, 235), (cx - 7, cy), (cx + 7, cy), 1)
+    pygame.draw.line(screen, (235, 235, 235), (cx, cy - 7), (cx, cy + 7), 1)
 
-    pygame.draw.line(screen, (230, 230, 230),
-                     (cx - 7, cy), (cx + 7, cy), 1)
-
-    pygame.draw.line(screen, (230, 230, 230),
-                     (cx, cy - 7), (cx, cy + 7), 1)
-
-    # Red X confirms that the shot connected with an enemy.
     if hit_marker_timer > 0:
         size = 12
-        pygame.draw.line(
-            screen, (255, 80, 80),
-            (cx - size, cy - size),
-            (cx + size, cy + size), 3
-        )
-        pygame.draw.line(
-            screen, (255, 80, 80),
-            (cx + size, cy - size),
-            (cx - size, cy + size), 3
-        )
+        pygame.draw.line(screen, (255, 80, 80), (cx - size, cy - size), (cx + size, cy + size), 3)
+        pygame.draw.line(screen, (255, 80, 80), (cx + size, cy - size), (cx - size, cy + size), 3)
 
 
 def render_minimap():
-    """A small top-down map useful while learning."""
+    """Retro tactical minimap with key, door, player, and enemy markers."""
     scale = 8
     offset_x = 10
-    offset_y = 10
+    offset_y = 38
+
+    pygame.draw.rect(screen, (5, 5, 7),
+                     (offset_x - 3, offset_y - 3, MAP_W * scale + 6, MAP_H * scale + 6))
 
     for y in range(MAP_H):
         for x in range(MAP_W):
             cell = LEVEL[y][x]
-
             if cell == "D":
-                color = (190, 25, 25)
+                cell_color = (190, 25, 25)
+            elif cell == "K":
+                cell_color = (170, 25, 25)
             elif cell == "#":
-                color = (100, 100, 100)
+                cell_color = (85, 85, 92)
             else:
-                color = (30, 30, 30)
+                cell_color = (22, 22, 25)
+            pygame.draw.rect(screen, cell_color,
+                             (offset_x + x * scale, offset_y + y * scale, scale - 1, scale - 1))
 
-            pygame.draw.rect(
-                screen,
-                color,
-                (
-                    offset_x + x * scale,
-                    offset_y + y * scale,
-                    scale - 1,
-                    scale - 1
-                )
-            )
+    # Living enemies are visible as red pips on the minimap.
+    for enemy in enemies:
+        if enemy.alive:
+            pygame.draw.circle(screen, (230, 45, 40),
+                               (int(offset_x + enemy.x * scale), int(offset_y + enemy.y * scale)), 2)
 
-    # Player.
-    pygame.draw.circle(
-        screen,
-        (0, 255, 0),
-        (
-            int(offset_x + player.x * scale),
-            int(offset_y + player.y * scale)
-        ),
-        3
-    )
+    pygame.draw.circle(screen, (50, 230, 70),
+                       (int(offset_x + player.x * scale), int(offset_y + player.y * scale)), 3)
+    pygame.draw.line(screen, (80, 255, 90),
+                     (int(offset_x + player.x * scale), int(offset_y + player.y * scale)),
+                     (int(offset_x + (player.x + math.cos(player.angle) * 0.9) * scale),
+                      int(offset_y + (player.y + math.sin(player.angle) * 0.9) * scale)), 2)
 
 
 # ------------------------------------------------------------
@@ -1232,6 +1215,10 @@ while running:
 
     screen.blit(scaled_view, (shake_x, shake_y))
 
+    # Subtle CRT scanlines for a deliberately retro presentation.
+    for sy in range(0, HEIGHT, 4):
+        pygame.draw.line(screen, (0, 0, 0), (0, sy), (WIDTH, sy), 1)
+
     render_weapon()
     render_hud()
 
@@ -1247,7 +1234,7 @@ while running:
 
     screen.blit(
         instructions,
-        (WIDTH // 2 - instructions.get_width() // 2, 5)
+        (WIDTH // 2 - instructions.get_width() // 2, 32)
     )
 
     # Damage flash + subtle red vignette.
