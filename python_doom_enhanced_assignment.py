@@ -1,5 +1,5 @@
 """
-PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL
+PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V12 WEAPON ARSENAL
 -------------------------------------------
 A beginner-friendly, single-file FPS made with Pygame.
 
@@ -17,6 +17,10 @@ Controls:
     E           Open doors / use exit
     SPACE       Jump
     Left Mouse  Shoot
+    1           Pistol
+    2           Shotgun
+    3           Chaingun
+    4           Rocket Launcher
     ESC         Quit
 
 This is an original mini-level inspired by classic 1990s raycasting FPS games.
@@ -29,7 +33,7 @@ import sys
 import pygame
 
 # ------------------------------------------------------------
-# WEEK 2 WORLD-STATE DECISION + WEEK 5 FUNCTION REFACTOR
+# WEEK 2 DECISION + WEEK 5 FUNCTION REFACTOR + V12 WEAPON ARSENAL
 # This happens in the PowerShell window BEFORE the game opens.
 # ------------------------------------------------------------
 
@@ -142,8 +146,26 @@ MAP_W = len(LEVEL[0])
 MAP_H = len(LEVEL)
 
 # ------------------------------------------------------------
-# 3. PLAYER
+# 3. WEAPONS + PLAYER
 # ------------------------------------------------------------
+
+WEAPONS = {
+    1: {"name": "PISTOL", "damage": 50, "cooldown": 0.35, "range": 12.0, "ammo_cost": 1},
+    2: {"name": "SHOTGUN", "damage": 35, "cooldown": 0.85, "range": 9.0, "ammo_cost": 2},
+    3: {"name": "CHAINGUN", "damage": 18, "cooldown": 0.10, "range": 12.0, "ammo_cost": 1},
+    4: {"name": "ROCKET LAUNCHER", "damage": 120, "cooldown": 1.00, "range": 14.0, "ammo_cost": 1},
+}
+
+
+def select_weapon(number):
+    """Switch weapons and return True when the requested weapon is valid."""
+    if number not in WEAPONS:
+        return False
+
+    player.current_weapon = number
+    player.ammo = player.weapon_ammo[number]
+    return True
+
 
 class Player:
     def __init__(self):
@@ -157,6 +179,15 @@ class Player:
         self.health = starting_health
         self.ammo = starting_ammo
         self.has_key = False
+
+        self.current_weapon = 1
+        self.weapon_ammo = {
+            1: starting_ammo,
+            2: max(2, starting_ammo // 2),
+            3: starting_ammo * 2,
+            4: max(1, starting_ammo // 6),
+        }
+        self.ammo = self.weapon_ammo[1]
 
         self.shoot_cooldown = 0.0
         self.hurt_flash = 0.0
@@ -517,22 +548,8 @@ def use_action():
 # 8. SHOOTING
 # ------------------------------------------------------------
 
-def shoot():
-    global muzzle_flash_timer, hit_marker_timer, screen_shake_timer
-
-    if player.shoot_cooldown > 0 or player.ammo <= 0:
-        return
-
-    player.ammo -= 1
-    player.shoot_cooldown = 0.35
-    muzzle_flash_timer = 0.10
-    screen_shake_timer = 0.08
-    shell_particles.append(
-        Particle(player.x, player.y, 0.8,
-                 random.uniform(0.4, 1.0), random.uniform(-0.8, 0.8),
-                 random.uniform(1.0, 2.0), 0.55, 0.05)
-    )
-
+def find_aimed_enemy(max_range, max_angle):
+    """Return the living enemy closest to the player's aim."""
     best_enemy = None
     best_score = 999
 
@@ -546,28 +563,114 @@ def shoot():
         difference = abs(normalize_angle(enemy_angle - player.angle))
         enemy_distance = math.hypot(dx, dy)
 
-        if difference < math.radians(5) and enemy_distance < 12:
+        if difference < max_angle and enemy_distance < max_range:
             if has_line_of_sight(player.x, player.y, enemy.x, enemy.y):
                 score = difference + enemy_distance * 0.002
-
                 if score < best_score:
                     best_score = score
                     best_enemy = enemy
 
-    if best_enemy:
-        best_enemy.health -= 50
-        best_enemy.flash_timer = 0.12
-        hit_marker_timer = 0.18
+    return best_enemy
 
-        spawn_blood(best_enemy.x, best_enemy.y, 20)
-        spawn_sparks(best_enemy.x, best_enemy.y, 10)
 
-        if best_enemy.health <= 0:
-            best_enemy.alive = False
-            best_enemy.death_timer = 0.55
-            spawn_blood(best_enemy.x, best_enemy.y, 55)
-            spawn_sparks(best_enemy.x, best_enemy.y, 18)
-            screen_shake_timer = 0.16
+def shoot():
+    global muzzle_flash_timer, hit_marker_timer, screen_shake_timer
+
+    weapon = WEAPONS[player.current_weapon]
+
+    if player.shoot_cooldown > 0 or player.ammo < weapon["ammo_cost"]:
+        return
+
+    player.ammo -= weapon["ammo_cost"]
+    player.weapon_ammo[player.current_weapon] = player.ammo
+    player.shoot_cooldown = weapon["cooldown"]
+    muzzle_flash_timer = 0.10
+    screen_shake_timer = 0.08
+
+    shell_particles.append(
+        Particle(player.x, player.y, 0.8,
+                 random.uniform(0.4, 1.0), random.uniform(-0.8, 0.8),
+                 random.uniform(1.0, 2.0), 0.55, 0.05)
+    )
+
+    # PISTOL: accurate single-target shot.
+    if player.current_weapon == 1:
+        target = find_aimed_enemy(weapon["range"], math.radians(5))
+        if target:
+            target.health -= weapon["damage"]
+            target.flash_timer = 0.12
+            hit_marker_timer = 0.18
+            spawn_blood(target.x, target.y, 20)
+            spawn_sparks(target.x, target.y, 10)
+
+    # SHOTGUN: a wide blast can hit multiple demons.
+    elif player.current_weapon == 2:
+        hit_any = False
+        for enemy in enemies:
+            if not enemy.alive:
+                continue
+            dx = enemy.x - player.x
+            dy = enemy.y - player.y
+            distance = math.hypot(dx, dy)
+            difference = abs(normalize_angle(math.atan2(dy, dx) - player.angle))
+            if distance < weapon["range"] and difference < math.radians(14):
+                if has_line_of_sight(player.x, player.y, enemy.x, enemy.y):
+                    falloff = max(0.35, 1.0 - distance / (weapon["range"] * 1.4))
+                    enemy.health -= int(weapon["damage"] * falloff)
+                    enemy.flash_timer = 0.15
+                    spawn_blood(enemy.x, enemy.y, 14)
+                    spawn_sparks(enemy.x, enemy.y, 7)
+                    hit_any = True
+        if hit_any:
+            hit_marker_timer = 0.20
+            screen_shake_timer = 0.14
+
+    # CHAINGUN: rapid-fire, accurate single-target shots.
+    elif player.current_weapon == 3:
+        target = find_aimed_enemy(weapon["range"], math.radians(7))
+        if target:
+            target.health -= weapon["damage"]
+            target.flash_timer = 0.10
+            hit_marker_timer = 0.12
+            spawn_blood(target.x, target.y, 9)
+            spawn_sparks(target.x, target.y, 5)
+        screen_shake_timer = 0.05
+
+    # ROCKET LAUNCHER: direct hit plus area-of-effect damage.
+    else:
+        target = find_aimed_enemy(weapon["range"], math.radians(8))
+        explosion_x = player.x + math.cos(player.angle) * weapon["range"]
+        explosion_y = player.y + math.sin(player.angle) * weapon["range"]
+
+        if target:
+            explosion_x, explosion_y = target.x, target.y
+            hit_marker_timer = 0.25
+
+        for enemy in enemies:
+            if not enemy.alive:
+                continue
+            distance = math.hypot(enemy.x - explosion_x, enemy.y - explosion_y)
+            if distance < 2.5 and has_line_of_sight(explosion_x, explosion_y, enemy.x, enemy.y):
+                damage = max(20, int(weapon["damage"] * (1.0 - distance / 3.0)))
+                enemy.health -= damage
+                enemy.flash_timer = 0.18
+                spawn_blood(enemy.x, enemy.y, 22)
+                spawn_sparks(enemy.x, enemy.y, 12)
+
+        spawn_sparks(explosion_x, explosion_y, 35)
+        spawn_blood(explosion_x, explosion_y, 20)
+        screen_shake_timer = 0.24
+
+    # One centralized death check keeps all four weapons compatible with
+    # the existing enemy loop and victory condition.
+    for enemy in enemies:
+        if enemy.alive and enemy.health <= 0:
+            enemy.alive = False
+            enemy.death_timer = 0.55
+            spawn_blood(enemy.x, enemy.y, 55)
+            spawn_sparks(enemy.x, enemy.y, 18)
+
+    player.weapon_ammo[player.current_weapon] = player.ammo
 
 
 # ------------------------------------------------------------
@@ -965,16 +1068,19 @@ def render_shells():
 # ------------------------------------------------------------
 
 def render_weapon():
-    """Draw a chunky, deliberately fake retro first-person weapon."""
+    """Draw a different retro weapon silhouette for each selected weapon."""
     bob_x = int(math.sin(player.bob_time * 1.8) * 5)
     bob_y = int(abs(math.cos(player.bob_time * 1.8)) * 4)
     recoil = int(muzzle_flash_timer * 80)
     center_x = WIDTH // 2 + bob_x
     base_y = HEIGHT - 25 + bob_y + recoil
 
+    weapon_name = WEAPONS[player.current_weapon]["name"]
+
     if muzzle_flash_timer > 0:
         flash_size = 70 + int(muzzle_flash_timer * 220)
-        pygame.draw.polygon(screen, (255, 205, 60), [
+        flash_color = (255, 150, 45) if player.current_weapon != 4 else (255, 220, 80)
+        pygame.draw.polygon(screen, flash_color, [
             (center_x, base_y - 155),
             (center_x - flash_size // 2, base_y - 35),
             (center_x + flash_size // 2, base_y - 35),
@@ -985,24 +1091,48 @@ def render_weapon():
             (center_x + flash_size // 5, base_y - 55),
         ])
 
-    # Grip/receiver silhouette.
-    pygame.draw.polygon(screen, (18, 18, 22), [
-        (center_x - 55, base_y), (center_x - 34, base_y - 112),
-        (center_x + 30, base_y - 112), (center_x + 52, base_y)
-    ])
-    pygame.draw.polygon(screen, (70, 70, 78), [
-        (center_x - 22, base_y - 125), (center_x + 22, base_y - 125),
-        (center_x + 29, base_y - 55), (center_x - 29, base_y - 55)
-    ])
-    pygame.draw.rect(screen, (8, 8, 10), (center_x - 12, base_y - 145, 24, 28))
-    pygame.draw.rect(screen, (155, 155, 165), (center_x - 8, base_y - 141, 16, 7))
-    pygame.draw.line(screen, (185, 185, 195), (center_x - 27, base_y - 82),
-                     (center_x + 27, base_y - 82), 3)
+    if player.current_weapon == 1:
+        # Pistol
+        pygame.draw.polygon(screen, (18, 18, 22), [
+            (center_x - 45, base_y), (center_x - 25, base_y - 110),
+            (center_x + 25, base_y - 110), (center_x + 42, base_y)
+        ])
+        pygame.draw.rect(screen, (75, 75, 82), (center_x - 18, base_y - 126, 36, 75))
+        pygame.draw.rect(screen, (8, 8, 10), (center_x - 10, base_y - 145, 20, 25))
 
-    # Retro green-ish status lights on the weapon.
-    glow = int(90 + 100 * (0.5 + 0.5 * math.sin(game_time * 8)))
-    pygame.draw.circle(screen, (40, glow, 55), (center_x - 17, base_y - 64), 4)
-    pygame.draw.circle(screen, (glow, 55, 35), (center_x + 17, base_y - 64), 4)
+    elif player.current_weapon == 2:
+        # Double-barrel shotgun
+        pygame.draw.polygon(screen, (30, 24, 20), [
+            (center_x - 70, base_y), (center_x - 48, base_y - 95),
+            (center_x + 48, base_y - 95), (center_x + 70, base_y)
+        ])
+        pygame.draw.rect(screen, (75, 65, 55), (center_x - 46, base_y - 135, 92, 38))
+        pygame.draw.rect(screen, (10, 10, 12), (center_x - 31, base_y - 155, 22, 55))
+        pygame.draw.rect(screen, (10, 10, 12), (center_x + 9, base_y - 155, 22, 55))
+
+    elif player.current_weapon == 3:
+        # Chaingun
+        pygame.draw.polygon(screen, (25, 28, 32), [
+            (center_x - 65, base_y), (center_x - 40, base_y - 105),
+            (center_x + 42, base_y - 105), (center_x + 65, base_y)
+        ])
+        for offset in (-28, -9, 10, 29):
+            pygame.draw.rect(screen, (65, 68, 75),
+                             (center_x + offset - 5, base_y - 160, 10, 75))
+        pygame.draw.rect(screen, (110, 110, 118), (center_x - 50, base_y - 82, 100, 16))
+
+    else:
+        # Rocket launcher
+        pygame.draw.polygon(screen, (25, 30, 25), [
+            (center_x - 72, base_y), (center_x - 52, base_y - 108),
+            (center_x + 52, base_y - 108), (center_x + 72, base_y)
+        ])
+        pygame.draw.rect(screen, (65, 75, 65), (center_x - 36, base_y - 145, 72, 90))
+        pygame.draw.rect(screen, (10, 10, 10), (center_x - 27, base_y - 178, 54, 45))
+        pygame.draw.circle(screen, (80, 180, 70), (center_x, base_y - 155), 8)
+
+    label = font.render(weapon_name, True, (230, 190, 90))
+    screen.blit(label, (WIDTH // 2 - label.get_width() // 2, HEIGHT - 96))
 
 
 def render_hud():
@@ -1026,6 +1156,7 @@ def render_hud():
 
     health_text = font.render(f"HEALTH: {player.health}", True, (220, 220, 220))
     ammo_text = font.render(f"AMMO: {player.ammo}", True, (220, 220, 220))
+    weapon_text = font.render(f"WEAPON: {WEAPONS[player.current_weapon]["name"]}", True, (230, 190, 90))
     key_text = font.render("RED KEY: YES" if player.has_key else "RED KEY: NO", True, (220, 220, 220))
     enemy_text = font.render(f"ENEMIES: {living_enemies}", True, (220, 220, 220))
     threat_text = font.render(f"THREAT: {total_enemy_threat}", True, (220, 220, 220))
@@ -1033,6 +1164,7 @@ def render_hud():
 
     screen.blit(health_text, (15, HEIGHT - 58))
     screen.blit(ammo_text, (215, HEIGHT - 58))
+    screen.blit(weapon_text, (215, HEIGHT - 12))
     screen.blit(key_text, (415, HEIGHT - 58))
     screen.blit(enemy_text, (615, HEIGHT - 58))
     screen.blit(threat_text, (615, HEIGHT - 32))
@@ -1187,6 +1319,10 @@ while running:
             if event.key == pygame.K_ESCAPE:
                 running = False
 
+            elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
+                weapon_number = event.key - pygame.K_0
+                select_weapon(weapon_number)
+
             elif event.key == pygame.K_SPACE and player.z <= 0.001:
                 player.jump_velocity = JUMP_STRENGTH
 
@@ -1256,7 +1392,7 @@ while running:
 
     # Instructions.
     instructions = font.render(
-        "WASD Move | Mouse/Arrows Turn | SPACE Jump | LMB Shoot | E Use",
+        "WASD Move | Mouse/Arrows Turn | SPACE Jump | LMB Shoot | 1-4 Weapons | E Use",
         True,
         (220, 220, 220)
     )
