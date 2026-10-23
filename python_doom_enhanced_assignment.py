@@ -4,7 +4,7 @@ PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL
 A beginner-friendly, single-file FPS made with Pygame.
 
 Install:
-    pip install pygame
+    pip install pygame-ce
 
 Run:
     python python_doom.py
@@ -213,6 +213,11 @@ damage_vignette_timer = 0.0
 game_time = 0.0
 shell_particles = []
 impact_sparks = []
+
+# Week 4: loop-driven world state. These values are rebuilt from the
+# actual enemy list every update, so they change as enemies are defeated.
+living_enemies = len(enemies)
+total_enemy_threat = 0
 
 
 class Particle:
@@ -554,9 +559,21 @@ def shoot():
 # ------------------------------------------------------------
 
 def update_enemies(dt):
+    global damage_vignette_timer
+
+    # The loop processes however many enemies actually exist in the level.
+    # The enemy count is determined by the player's earlier strategy choice,
+    # so this is not a hardcoded iteration count.
+    living_count = 0
+    threat_total = 0
+
     for enemy in enemies:
         if not enemy.alive:
             continue
+
+        # Accumulators change as the loop processes each living enemy.
+        living_count += 1
+        threat_total += 10
 
         enemy.attack_timer -= dt
 
@@ -585,12 +602,14 @@ def update_enemies(dt):
         if dist < 1.2 and enemy.attack_timer <= 0:
             player.health -= 10
             player.hurt_flash = 0.15
-            global damage_vignette_timer
             damage_vignette_timer = 0.30
             enemy.attack_timer = 1.0
 
             if player.health <= 0:
                 player.health = 0
+
+    # Save the accumulated results so the HUD and door logic can use them.
+    return living_count, threat_total
 
 
 # ------------------------------------------------------------
@@ -969,11 +988,18 @@ def render_hud():
     screen.blit(key_text, (420, HEIGHT - 55))
 
     enemy_text = font.render(
-        f"ENEMIES: {sum(1 for e in enemies if e.alive)}",
+        f"ENEMIES: {living_enemies}",
         True,
         (220, 220, 220)
     )
     screen.blit(enemy_text, (600, HEIGHT - 55))
+
+    threat_text = font.render(
+        f"THREAT: {total_enemy_threat}",
+        True,
+        (220, 220, 220)
+    )
+    screen.blit(threat_text, (600, HEIGHT - 30))
 
     # ENEMY RADAR: shows arrows toward living enemies that are outside the
     # current view or hidden behind a wall, so every required target can be found.
@@ -1163,7 +1189,7 @@ while running:
         continue
 
     update_player(dt)
-    update_enemies(dt)
+    living_enemies, total_enemy_threat = update_enemies(dt)
     update_interactions()
     update_particles(dt)
 
