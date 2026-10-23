@@ -1,5 +1,5 @@
 """
-PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V14 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN
+PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V15 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN + PROCEDURAL GUITAR MUSIC
 -------------------------------------------
 A beginner-friendly, single-file FPS made with Pygame.
 
@@ -104,6 +104,127 @@ GRAVITY = 15.0
 WEAPON_BOB_SPEED = 9.0
 
 pygame.init()
+
+# ------------------------------------------------------------
+# PROCEDURAL MUSIC
+# ------------------------------------------------------------
+# The soundtrack is generated from the Drop-A 7-string guitar tab
+# supplied for this project. No external music file is required.
+# Tuning assumed: A1-E2-A2-D3-G3-B3-E4.
+#
+# Each tuple is (note name, beats). The note frequencies are generated
+# mathematically and mixed into a WAV-like PCM buffer for Pygame.
+# ------------------------------------------------------------
+
+MUSIC_SAMPLE_RATE = 44100
+MUSIC_VOLUME = 0.24
+MUSIC_BPM = 150
+
+MUSIC_NOTE_FREQUENCIES = {
+    "C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3,
+    "E": 4, "F": 5, "F#": 6, "GB": 6, "G": 7, "G#": 8,
+    "AB": 8, "A": 9, "A#": 10, "BB": 10, "B": 11,
+}
+
+
+def music_note_frequency(note_name):
+    """Convert C4/F#5/etc. into Hz using A4 = 440 Hz."""
+    note_name = note_name.upper()
+    if len(note_name) >= 3 and note_name[1] in "#B":
+        pitch = note_name[:2]
+        octave = int(note_name[2:])
+    else:
+        pitch = note_name[:1]
+        octave = int(note_name[1:])
+
+    midi = 12 * (octave + 1) + MUSIC_NOTE_FREQUENCIES[pitch]
+    return 440.0 * (2.0 ** ((midi - 69) / 12.0))
+
+
+# Translated from the user's Drop-A 7-string tab.
+# The original tab does not specify exact rhythmic note values, so these
+# are an initial musical interpretation that can be changed later.
+GUITAR_SECTION_1 = [
+    ("A5", 0.25), ("E5", 0.25), ("C5", 0.25), ("A4", 0.25), ("E4", 0.25),
+    ("A5", 0.25), ("E5", 0.25), ("C5", 0.25), ("A4", 0.25), ("E4", 0.25),
+    ("A5", 0.25), ("E5", 0.25), ("C5", 0.25), ("A4", 0.25), ("E4", 0.25),
+    ("C4", 0.25), ("A3", 0.25), ("C4", 0.25),
+]
+
+GUITAR_SECTION_2 = [
+    ("B3", 0.25), ("D4", 0.25), ("F4", 0.25),
+    ("B4", 0.25), ("D5", 0.25), ("F5", 0.25), ("B5", 0.50),
+]
+
+GUITAR_SECTION_3 = GUITAR_SECTION_1
+
+GUITAR_SECTION_4 = [
+    ("B3", 0.25), ("D4", 0.25), ("F4", 0.25),
+    ("B4", 0.25), ("D5", 0.25), ("F5", 0.25), ("B5", 0.50),
+    ("F5", 0.25), ("D5", 0.25), ("B4", 0.50),
+]
+
+GUITAR_SONG = (
+    GUITAR_SECTION_1
+    + GUITAR_SECTION_2
+    + GUITAR_SECTION_3
+    + GUITAR_SECTION_4
+)
+
+
+def build_music_buffer(song, bpm):
+    """Generate a simple distorted-synth guitar-style PCM track."""
+    import array
+
+    samples = array.array("h")
+    beat_seconds = 60.0 / bpm
+
+    for note_name, beats in song:
+        frequency = music_note_frequency(note_name)
+        duration = beats * beat_seconds
+        count = max(1, int(MUSIC_SAMPLE_RATE * duration))
+
+        for i in range(count):
+            t = i / MUSIC_SAMPLE_RATE
+            phase = 2.0 * math.pi * frequency * t
+
+            # Several harmonics give the pure sine wave a gritty,
+            # guitar/synth-like character without requiring an audio file.
+            value = (
+                0.72 * math.sin(phase)
+                + 0.20 * math.sin(phase * 2.0)
+                + 0.08 * math.sin(phase * 3.0)
+            )
+
+            # Short attack/release prevents clicks between notes.
+            attack = min(0.012, duration / 4.0)
+            release = min(0.045, duration / 3.0)
+            envelope = 1.0
+            if t < attack:
+                envelope = t / attack
+            elif duration - t < release:
+                envelope = max(0.0, (duration - t) / release)
+
+            value *= envelope * MUSIC_VOLUME
+            samples.append(int(max(-1.0, min(1.0, value)) * 32767))
+
+    return samples.tobytes()
+
+
+def start_game_music():
+    """Generate the guitar riff and start it looping during gameplay."""
+    try:
+        pygame.mixer.init(frequency=MUSIC_SAMPLE_RATE, size=-16, channels=1)
+        music_buffer = build_music_buffer(GUITAR_SONG, MUSIC_BPM)
+        music_sound = pygame.mixer.Sound(buffer=music_buffer)
+        music_sound.set_volume(1.0)
+        music_sound.play(loops=-1)
+        return music_sound
+    except pygame.error as error:
+        print(f"Music disabled: {error}")
+        return None
+
+
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Python DOOM-Style FPS - Hell Sector v14")
 
@@ -112,6 +233,9 @@ clock = pygame.time.Clock()
 
 font = pygame.font.Font(None, 28)
 big_font = pygame.font.Font(None, 64)
+
+# Start the procedurally generated Drop-A guitar track.
+game_music = start_game_music()
 
 # ------------------------------------------------------------
 # 2. THE LEVEL
@@ -1532,6 +1656,11 @@ else:
         "YOU DIED",
         "Press ENTER to quit."
     )
+
+if game_music is not None:
+    game_music.stop()
+if pygame.mixer.get_init():
+    pygame.mixer.quit()
 
 pygame.quit()
 sys.exit()
