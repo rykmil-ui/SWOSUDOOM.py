@@ -1,5 +1,5 @@
 """
-PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V18 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN + CORRECTED PROCEDURAL GUITAR MUSIC
+PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V21 + SELECTABLE PROCEDURAL SOUNDTRACK
 -------------------------------------------
 A beginner-friendly, single-file FPS made with Pygame.
 
@@ -80,6 +80,15 @@ if fuel_remaining < 20:
     print("Loading DOOM...")
 else:
     print("Fuel levels nominal. Tactical mode selected.")
+
+print("\nChoose the gameplay soundtrack:")
+print("1 - Drop-A guitar riff (original soundtrack)")
+print("2 - 165 Hz melody (new song)")
+while True:
+    song_choice = input("Enter 1 or 2: ").strip()
+    if song_choice in ("1", "2"):
+        break
+    print("Please enter 1 or 2.")
 
 # ------------------------------------------------------------
 # 1. BASIC SETTINGS
@@ -223,6 +232,16 @@ GUITAR_SONG = (
     + GUITAR_SECTION_4
 )
 
+# Song 2 transcribed from the user's MakeCode / micro:bit melody.
+# Each entry is (frequency in Hz, beat duration). QUARTER = 1 beat; WHOLE = 4 beats.
+SECOND_SONG_NOTES = [
+    165, 165, 330, 165, 165, 294, 165, 165, 262, 165, 165, 233,
+    165, 165, 247, 262, 165, 165, 330, 165, 165, 294, 165, 165,
+    262, 165, 165, 233,
+]
+SECOND_SONG = [((frequency,), 4 if i == len(SECOND_SONG_NOTES) - 1 else 1)
+               for i, frequency in enumerate(SECOND_SONG_NOTES)]
+
 
 def build_music_buffer(song, bpm):
     """Generate a simple distorted-synth guitar-style PCM track."""
@@ -235,7 +254,15 @@ def build_music_buffer(song, bpm):
         duration = beats * beat_seconds
         count = max(1, int(MUSIC_SAMPLE_RATE * duration))
 
-        frequencies = [music_note_frequency(note_name) for note_name in note_group]
+        # Guitar song entries use note names; the second song uses exact Hz values.
+        if isinstance(note_group, (int, float)):
+            frequencies = [float(note_group)]
+        else:
+            frequencies = [
+                float(note_name) if isinstance(note_name, (int, float))
+                else music_note_frequency(note_name)
+                for note_name in note_group
+            ]
 
         for i in range(count):
             t = i / MUSIC_SAMPLE_RATE
@@ -319,11 +346,17 @@ def build_weapon_sounds():
 
 
 def start_game_music():
-    """Generate the guitar riff and start it looping during gameplay."""
+    """Generate the selected soundtrack and start it looping during gameplay."""
     try:
         pygame.mixer.init(frequency=MUSIC_SAMPLE_RATE, size=-16, channels=1)
         weapon_sounds = build_weapon_sounds()
-        music_buffer = build_music_buffer(GUITAR_SONG, MUSIC_BPM)
+        if song_choice == "1":
+            selected_song = GUITAR_SONG
+            selected_bpm = MUSIC_BPM
+        else:
+            selected_song = SECOND_SONG
+            selected_bpm = 120.0  # MakeCode's typical default tempo is 120 BPM.
+        music_buffer = build_music_buffer(selected_song, selected_bpm)
         music_sound = pygame.mixer.Sound(buffer=music_buffer)
         music_sound.set_volume(1.0)
         music_sound.play(loops=-1)
@@ -334,7 +367,7 @@ def start_game_music():
 
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Python DOOM-Style FPS - Hell Sector v14")
+pygame.display.set_caption("Python DOOM-Style FPS - Hell Sector v21")
 
 view = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT))
 clock = pygame.time.Clock()
