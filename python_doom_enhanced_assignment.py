@@ -1,5 +1,5 @@
 """
-PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V15 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN + PROCEDURAL GUITAR MUSIC
+PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V18 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN + CORRECTED PROCEDURAL GUITAR MUSIC
 -------------------------------------------
 A beginner-friendly, single-file FPS made with Pygame.
 
@@ -141,27 +141,79 @@ def music_note_frequency(note_name):
     return 440.0 * (2.0 ** ((midi - 69) / 12.0))
 
 
-# Translated from the user's Drop-A 7-string tab.
-# The original tab does not specify exact rhythmic note values, so these
-# are an initial musical interpretation that can be changed later.
+# Translated directly from the user's Drop-A 7-string tab.
+# Tuning used:
+#   1=E4, 2=B3, 3=G3, 4=D3, 5=A2, 6=E2, 7=A1
+#
+# The tab does not provide formal rhythmic notation. Here the horizontal
+# spacing is preserved as the timing source: 3 tab columns = 1/4 beat.
+# Notes that begin in the same column are treated as a chord.
+TAB_COLUMNS_PER_QUARTER_BEAT = 3.0
+TAB_DEFAULT_FINAL_BEATS = 0.25
+
 GUITAR_SECTION_1 = [
-    ("A5", 0.25), ("E5", 0.25), ("C5", 0.25), ("A4", 0.25), ("E4", 0.25),
-    ("A5", 0.25), ("E5", 0.25), ("C5", 0.25), ("A4", 0.25), ("E4", 0.25),
-    ("A5", 0.25), ("E5", 0.25), ("C5", 0.25), ("A4", 0.25), ("E4", 0.25),
-    ("C4", 0.25), ("A3", 0.25), ("C4", 0.25),
+    (("A5",), 0.25),
+    (("E5",), 0.25),
+    (("C5",), 0.25),
+    (("A4",), 2/12),
+    (("C5",), 0.25),
+    (("E5",), 0.25),
+    (("A5",), 2/12),
+    (("E5",), 0.25),
+    (("C5",), 0.25),
+    (("A4",), 2/12),
+    (("C5",), 0.25),
+    (("E5",), 4/12),
+    (("A5",), 1/12),
+    (("E5",), 0.25),
+    (("C5",), 4/12),
+    (("A4",), 4/12),
+    (("E4",), 0.25),
+    (("C4",), 4/12),
+    (("A3",), 4/12),
+    (("C4",), 0.25),
+    (("E4",), 2/12),
+    (("A4",), 1/12),
+    (("C5",), 0.25),
+    (("E5",), 4/12),
+    (("A5",), 1/12),
+    (("E5",), 0.25),
+    (("C5",), 4/12),
+    (("A4",), 1/12),
+    (("C5",), 0.25),
+    (("E5",), 5/12),
+    (("A5",), 1/12),
+    (("E5",), 4/12),
+    (("C5",), 5/12),
+    (("A4",), 0.25),
 ]
 
 GUITAR_SECTION_2 = [
-    ("B3", 0.25), ("D4", 0.25), ("F4", 0.25),
-    ("B4", 0.25), ("D5", 0.25), ("F5", 0.25), ("B5", 0.50),
+    (("B3",), 4/12),
+    (("D4",), 4/12),
+    (("F4",), 0.25),
+    (("B4",), 0.25),
+    (("D5",), 0.25),
+    (("F5",), 0.25),
+    (("B5",), 0.25),
+    (("F5",), 0.25),
+    (("D5",), 0.25),
+    (("B4",), TAB_DEFAULT_FINAL_BEATS),
 ]
 
 GUITAR_SECTION_3 = GUITAR_SECTION_1
 
 GUITAR_SECTION_4 = [
-    ("B3", 0.25), ("D4", 0.25), ("F4", 0.25),
-    ("B4", 0.25), ("D5", 0.25), ("F5", 0.25), ("B5", 0.50),
-    ("F5", 0.25), ("D5", 0.25), ("B4", 0.50),
+    (("B3",), 0.25),
+    (("D4",), 0.25),
+    (("F4",), 0.25),
+    (("B4",), 0.25),
+    (("D5",), 5/12),
+    (("F5",), 4/12),
+    (("B5",), 0.25),
+    (("F5",), 4/12),
+    (("D5",), 0.25),
+    (("B4",), TAB_DEFAULT_FINAL_BEATS),
 ]
 
 GUITAR_SONG = (
@@ -179,22 +231,25 @@ def build_music_buffer(song, bpm):
     samples = array.array("h")
     beat_seconds = 60.0 / bpm
 
-    for note_name, beats in song:
-        frequency = music_note_frequency(note_name)
+    for note_group, beats in song:
         duration = beats * beat_seconds
         count = max(1, int(MUSIC_SAMPLE_RATE * duration))
 
+        frequencies = [music_note_frequency(note_name) for note_name in note_group]
+
         for i in range(count):
             t = i / MUSIC_SAMPLE_RATE
-            phase = 2.0 * math.pi * frequency * t
 
-            # Several harmonics give the pure sine wave a gritty,
-            # guitar/synth-like character without requiring an audio file.
-            value = (
-                0.72 * math.sin(phase)
-                + 0.20 * math.sin(phase * 2.0)
-                + 0.08 * math.sin(phase * 3.0)
-            )
+            # Sum simultaneous notes when the tab contains a chord.
+            value = 0.0
+            for frequency in frequencies:
+                phase = 2.0 * math.pi * frequency * t
+                value += (
+                    0.72 * math.sin(phase)
+                    + 0.20 * math.sin(phase * 2.0)
+                    + 0.08 * math.sin(phase * 3.0)
+                )
+            value /= max(1, len(frequencies))
 
             # Short attack/release prevents clicks between notes.
             attack = min(0.012, duration / 4.0)
