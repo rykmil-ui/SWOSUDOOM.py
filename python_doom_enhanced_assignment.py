@@ -188,9 +188,9 @@ def validate_enemy_positions():
             )
 
 enemies = [
-    Enemy(8.5, 2.5, "imp"),
+    Enemy(12.5, 2.5, "imp"),
     Enemy(10.5, 3.5, "imp"),
-    Enemy(12.5, 6.5, "brute"),
+    Enemy(10.5, 6.5, "brute"),
     Enemy(5.5, 9.5, "imp"),
     Enemy(8.5, 9.5, "brute"),
     Enemy(12.5, 9.5, "imp"),
@@ -335,6 +335,11 @@ def cell_at(x, y):
         return "#"
 
     return LEVEL[my][mx]
+
+
+# Validate the final spawn locations after cell_at() is defined.
+# This prevents an enemy from accidentally being placed inside a wall.
+validate_enemy_positions()
 
 
 def is_blocking(x, y):
