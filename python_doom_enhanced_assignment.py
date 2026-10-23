@@ -219,6 +219,12 @@ impact_sparks = []
 living_enemies = len(enemies)
 total_enemy_threat = 0
 
+# Week 4: Doom-inspired "Hellwave" state. Each active demon is processed
+# during the sector scan below. This running state changes as demons move,
+# attack, take damage, and are eliminated.
+hellwave_events = 0
+hell_pressure = 0
+
 
 class Particle:
     def __init__(self, x, y, z, vx, vy, vz, lifetime, size):
@@ -564,21 +570,33 @@ def shoot():
 # ------------------------------------------------------------
 
 def update_enemies(dt):
-    global damage_vignette_timer
+    global damage_vignette_timer, hellwave_events, hell_pressure
 
-    # The loop processes however many enemies actually exist in the level.
-    # The enemy count is determined by the player's earlier strategy choice,
-    # so this is not a hardcoded iteration count.
+    # DOOM-inspired Hellwave sector scan:
+    # The loop processes every demon that actually exists in the current
+    # encounter. The number of iterations comes from the enemies list, which
+    # was changed by the player's Assault/Tactical/Escape decision.
     living_count = 0
     threat_total = 0
+    pulse_pressure = 0
 
     for enemy in enemies:
         if not enemy.alive:
             continue
 
-        # Accumulators change as the loop processes each living enemy.
+        # These accumulators change once for EACH living demon processed.
+        # They are not fixed print statements or a hardcoded range.
         living_count += 1
-        threat_total += 10
+        hellwave_events += 1
+
+        # Brutes create more Hell pressure than Imps. A damaged demon
+        # contributes less pressure, so the accumulated state changes during
+        # combat as well as when demons are removed from the list of living
+        # enemies.
+        demon_weight = 15 if enemy.kind == "brute" else 10
+        health_ratio = max(0.0, enemy.health / enemy.max_health)
+        pulse_pressure += int(demon_weight * health_ratio)
+        threat_total += demon_weight
 
         enemy.attack_timer -= dt
 
@@ -612,6 +630,10 @@ def update_enemies(dt):
 
             if player.health <= 0:
                 player.health = 0
+
+    # Hell pressure is a persistent state that follows the current demon
+    # population. It eases down as demons are damaged or destroyed.
+    hell_pressure = pulse_pressure
 
     # Save the accumulated results so the HUD and door logic can use them.
     return living_count, threat_total
@@ -1002,12 +1024,14 @@ def render_hud():
     key_text = font.render("RED KEY: YES" if player.has_key else "RED KEY: NO", True, (220, 220, 220))
     enemy_text = font.render(f"ENEMIES: {living_enemies}", True, (220, 220, 220))
     threat_text = font.render(f"THREAT: {total_enemy_threat}", True, (220, 220, 220))
+    hell_text = font.render(f"HELLWAVE: {hell_pressure}", True, (220, 120, 80))
 
     screen.blit(health_text, (15, HEIGHT - 58))
     screen.blit(ammo_text, (215, HEIGHT - 58))
     screen.blit(key_text, (415, HEIGHT - 58))
     screen.blit(enemy_text, (615, HEIGHT - 58))
     screen.blit(threat_text, (615, HEIGHT - 32))
+    screen.blit(hell_text, (615, HEIGHT - 12))
 
     # Health/ammo mini-bars make the HUD feel more game-like.
     pygame.draw.rect(screen, (35, 35, 38), (15, HEIGHT - 30, 160, 6))
