@@ -85,8 +85,8 @@ big_font = pygame.font.Font(None, 64)
 #
 # # = wall
 # . = empty floor
-# D = closed door
-# K = key
+# D = RED DOOR (requires red key + all enemies defeated)
+# K = red key
 # E = level exit
 #
 # This is an ORIGINAL layout rather than a recreation of a
@@ -427,9 +427,12 @@ def update_interactions():
     # This function is left here to keep game logic organized.
 
 
+def all_enemies_dead():
+    return all(not enemy.alive for enemy in enemies)
+
+
 def use_action():
-    """Open a nearby door or activate the exit."""
-    # Check cells in a small radius around the player.
+    """Open the red door only after getting the red key and killing every enemy."""
     for y in range(max(0, int(player.y) - 1), min(MAP_H, int(player.y) + 2)):
         for x in range(max(0, int(player.x) - 1), min(MAP_W, int(player.x) + 2)):
             cell = LEVEL[y][x]
@@ -438,20 +441,16 @@ def use_action():
                 d = distance(player.x, player.y, x + 0.5, y + 0.5)
 
                 if d < 1.5:
-                    if player.has_key:
-                        # Replace the door with floor.
-                        row = list(LEVEL[y])
-                        row[x] = "."
-                        LEVEL[y] = "".join(row)
-                        print("Door opened!")
+                    if not player.has_key:
+                        print("The RED DOOR is locked. Find the RED KEY.")
+                    elif not all_enemies_dead():
+                        print("The RED DOOR is locked. Kill every enemy first!")
                     else:
-                        print("The door is locked. Find the key.")
+                        # Opening the red door immediately ends the level.
+                        print("The RED DOOR opens...")
+                        print("#1 victory royale")
+                        return "win"
                     return
-
-    # Exit is near the upper-right side of the map.
-    # We use a small invisible exit trigger at this location.
-    if player.has_key and distance(player.x, player.y, 14.0, 10.0) < 1.2:
-        return "win"
 
     return None
 
@@ -617,13 +616,28 @@ def render_world():
         bottom = VIEW_HEIGHT // 2 + wall_height // 2 - jump_offset
 
         shade = max(28, int(225 - corrected_distance * 11))
-        # Subtle animated industrial color variation.
-        stripe = 1 if (column // 9) % 2 else 0
-        wall_color = (
-            min(255, shade + 10 * stripe),
-            max(0, shade - 8),
-            max(0, shade - 15)
-        )
+
+        # Identify what the ray hit so the red door can be rendered red.
+        hit_x = player.x + math.cos(ray_angle) * raw_distance
+        hit_y = player.y + math.sin(ray_angle) * raw_distance
+        hit_cell = cell_at(hit_x, hit_y)
+
+        if hit_cell == "D":
+            # Bright red metal door with darker distance shading.
+            stripe = 1 if (column // 9) % 2 else 0
+            wall_color = (
+                min(255, int(shade * 1.05) + 18 * stripe),
+                max(18, int(shade * 0.18)),
+                max(18, int(shade * 0.12))
+            )
+        else:
+            # Subtle animated industrial color variation.
+            stripe = 1 if (column // 9) % 2 else 0
+            wall_color = (
+                min(255, shade + 10 * stripe),
+                max(0, shade - 8),
+                max(0, shade - 15)
+            )
 
         pygame.draw.line(view, wall_color, (column, top), (column, bottom))
 
@@ -772,6 +786,36 @@ def render_enemies(wall_distances):
             pygame.draw.rect(view, (210, 35, 30), (left, bar_y, fill, 3))
 
 
+def render_particles():
+    """Render blood and impact particles in the 3-D view."""
+    particles = [(blood_particles, (190, 35, 35)),
+                 (impact_sparks, (255, 210, 80))]
+
+    for particle_list, base_color in particles:
+        for particle in particle_list:
+            dx = particle.x - player.x
+            dy = particle.y - player.y
+            distance = math.hypot(dx, dy)
+            if distance < 0.05 or distance > MAX_DEPTH:
+                continue
+
+            rel = normalize_angle(math.atan2(dy, dx) - player.angle)
+            if abs(rel) >= HALF_FOV:
+                continue
+
+            screen_x = VIEW_WIDTH / 2 + math.tan(rel) * (VIEW_WIDTH / 2) / math.tan(HALF_FOV)
+            screen_y = (VIEW_HEIGHT / 2
+                        - int((particle.z / distance) * VIEW_HEIGHT)
+                        - int(player.z * 28))
+
+            scale = max(1, int((particle.size * 90) / distance))
+            alpha = max(0.15, particle.lifetime / particle.max_lifetime)
+            color = tuple(max(0, min(255, int(c * alpha))) for c in base_color)
+
+            pygame.draw.circle(view, color,
+                               (int(screen_x), int(screen_y)), scale)
+
+
 def render_shells():
     for particle in shell_particles:
         dx = particle.x - player.x
@@ -871,7 +915,7 @@ def render_hud():
     )
 
     key_text = font.render(
-        "KEY: YES" if player.has_key else "KEY: NO",
+        "RED KEY: YES" if player.has_key else "RED KEY: NO",
         True,
         (220, 220, 220)
     )
@@ -879,6 +923,13 @@ def render_hud():
     screen.blit(health_text, (20, HEIGHT - 55))
     screen.blit(ammo_text, (220, HEIGHT - 55))
     screen.blit(key_text, (420, HEIGHT - 55))
+
+    enemy_text = font.render(
+        f"ENEMIES: {sum(1 for e in enemies if e.alive)}",
+        True,
+        (220, 220, 220)
+    )
+    screen.blit(enemy_text, (600, HEIGHT - 55))
 
     # Crosshair.
     cx = WIDTH // 2
@@ -915,7 +966,9 @@ def render_minimap():
         for x in range(MAP_W):
             cell = LEVEL[y][x]
 
-            if cell in "#D":
+            if cell == "D":
+                color = (190, 25, 25)
+            elif cell == "#":
                 color = (100, 100, 100)
             else:
                 color = (30, 30, 30)
