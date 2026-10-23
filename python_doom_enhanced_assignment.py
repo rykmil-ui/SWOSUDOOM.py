@@ -355,7 +355,7 @@ def start_game_music():
             selected_bpm = MUSIC_BPM
         else:
             selected_song = SECOND_SONG
-            selected_bpm = 120.0  # MakeCode's typical default tempo is 120 BPM.
+            selected_bpm = 140.0  # Slightly faster version of the second track.
         music_buffer = build_music_buffer(selected_song, selected_bpm)
         music_sound = pygame.mixer.Sound(buffer=music_buffer)
         music_sound.set_volume(1.0)
