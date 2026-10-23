@@ -29,13 +29,28 @@ import sys
 import pygame
 
 # ------------------------------------------------------------
-# WEEK 2 WORLD-STATE DECISION
+# WEEK 2 WORLD-STATE DECISION + WEEK 5 FUNCTION REFACTOR
 # This happens in the PowerShell window BEFORE the game opens.
 # ------------------------------------------------------------
+
+def configure_strategy(fuel_remaining, strategy_choice):
+    """Return the gameplay settings selected by the world-state decision."""
+    if fuel_remaining < 20:
+        if strategy_choice == "1":
+            return "assault", 45, 100, 8
+        elif strategy_choice == "2":
+            return "tactical", 30, 100, 6
+        else:
+            return "escape", 18, 70, 4
+
+    return "tactical", 30, 100, 6
+
+
 fuel_remaining = 15
 
 # Week 3: a real three-outcome decision.
-# The selected strategy changes actual gameplay variables below.
+# The decision is now refactored into configure_strategy(),
+# which returns the actual gameplay settings used below.
 if fuel_remaining < 20:
     print("Warning: fuel critical.")
     print("Choose your strategy:")
@@ -44,32 +59,22 @@ if fuel_remaining < 20:
     print("3 - Escape: fewer enemies, less ammunition, reduced health")
 
     strategy = input("Enter 1, 2, or 3: ").strip()
+else:
+    strategy = "2"
 
-    if strategy == "1":
-        game_strategy = "assault"
-        starting_ammo = 45
-        starting_health = 100
-        enemy_limit = 8
+game_strategy, starting_ammo, starting_health, enemy_limit = configure_strategy(
+    fuel_remaining, strategy
+)
+
+if fuel_remaining < 20:
+    if game_strategy == "assault":
         print("ASSAULT selected: prepare for a larger fight!")
-    elif strategy == "2":
-        game_strategy = "tactical"
-        starting_ammo = 30
-        starting_health = 100
-        enemy_limit = 6
+    elif game_strategy == "tactical":
         print("TACTICAL selected: balanced resources and opposition.")
     else:
-        game_strategy = "escape"
-        starting_ammo = 18
-        starting_health = 70
-        enemy_limit = 4
         print("ESCAPE selected: fewer enemies, but limited health and ammunition.")
-
     print("Loading DOOM...")
 else:
-    game_strategy = "tactical"
-    starting_ammo = 30
-    starting_health = 100
-    enemy_limit = 6
     print("Fuel levels nominal. Tactical mode selected.")
 
 # ------------------------------------------------------------
