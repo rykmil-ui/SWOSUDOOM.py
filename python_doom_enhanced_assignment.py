@@ -15,7 +15,8 @@ Controls:
     Left/Right  Turn
     Mouse       Turn
     E           Open doors / use exit
-    SPACE       Shoot
+    SPACE       Jump
+    Left Mouse  Shoot
     ESC         Quit
 
 This is an original mini-level inspired by classic 1990s raycasting FPS games.
@@ -64,10 +65,13 @@ MAX_DEPTH = 20
 
 MOVE_SPEED = 3.0
 TURN_SPEED = 2.2
+JUMP_STRENGTH = 5.8
+GRAVITY = 15.0
+WEAPON_BOB_SPEED = 9.0
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Python DOOM-Style FPS - One Level")
+pygame.display.set_caption("Python DOOM-Style FPS - Enhanced Level")
 
 view = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT))
 clock = pygame.time.Clock()
@@ -126,6 +130,9 @@ class Player:
 
         self.shoot_cooldown = 0.0
         self.hurt_flash = 0.0
+        self.z = 0.0
+        self.jump_velocity = 0.0
+        self.bob_time = 0.0
 
 player = Player()
 
@@ -134,17 +141,27 @@ player = Player()
 # ------------------------------------------------------------
 
 class Enemy:
-    def __init__(self, x, y):
+    def __init__(self, x, y, kind="imp"):
         self.x = x
         self.y = y
-        self.health = 100
-        self.attack_timer = 0.0
+        self.kind = kind
+        self.max_health = 100 if kind == "imp" else 140
+        self.health = self.max_health
+        self.attack_timer = random.uniform(0.2, 1.0)
         self.alive = True
+        self.death_timer = 0.0
+        self.anim_time = random.uniform(0, math.tau)
+        self.flash_timer = 0.0
 
 enemies = [
-    Enemy(10.5, 3.5),
-    Enemy(12.5, 6.5),
-    Enemy(5.5, 9.5),
+    Enemy(8.5, 2.5, "imp"),
+    Enemy(10.5, 3.5, "imp"),
+    Enemy(12.5, 6.5, "brute"),
+    Enemy(5.5, 9.5, "imp"),
+    Enemy(8.5, 9.5, "brute"),
+    Enemy(12.5, 9.5, "imp"),
+    Enemy(6.5, 6.5, "imp"),
+    Enemy(13.5, 2.5, "brute"),
 ]
 
 # ------------------------------------------------------------
@@ -155,6 +172,10 @@ blood_particles = []
 muzzle_flash_timer = 0.0
 hit_marker_timer = 0.0
 screen_shake_timer = 0.0
+damage_vignette_timer = 0.0
+game_time = 0.0
+shell_particles = []
+impact_sparks = []
 
 
 class Particle:
@@ -189,8 +210,27 @@ def spawn_blood(x, y, amount=18):
         )
 
 
+def spawn_sparks(x, y, amount=8):
+    for _ in range(amount):
+        a = random.uniform(0, math.tau)
+        speed = random.uniform(1.0, 3.0)
+        impact_sparks.append(
+            Particle(
+                x, y, random.uniform(0.2, 1.0),
+                math.cos(a) * speed,
+                math.sin(a) * speed,
+                random.uniform(0.5, 2.5),
+                random.uniform(0.12, 0.35),
+                random.uniform(0.02, 0.05),
+            )
+        )
+
+
 def update_particles(dt):
     global muzzle_flash_timer, hit_marker_timer, screen_shake_timer
+    global damage_vignette_timer, game_time
+
+    game_time += dt
 
     for particle in blood_particles[:]:
         particle.lifetime -= dt
@@ -198,13 +238,37 @@ def update_particles(dt):
         particle.y += particle.vy * dt
         particle.z += particle.vz * dt
         particle.vz -= 3.5 * dt
-
         if particle.lifetime <= 0 or particle.z < 0:
             blood_particles.remove(particle)
+
+    for particle in shell_particles[:]:
+        particle.lifetime -= dt
+        particle.x += particle.vx * dt
+        particle.y += particle.vy * dt
+        particle.z += particle.vz * dt
+        particle.vz -= 10.0 * dt
+        if particle.lifetime <= 0 or particle.z < 0:
+            shell_particles.remove(particle)
+
+    for particle in impact_sparks[:]:
+        particle.lifetime -= dt
+        particle.x += particle.vx * dt
+        particle.y += particle.vy * dt
+        particle.z += particle.vz * dt
+        particle.vz -= 5.0 * dt
+        if particle.lifetime <= 0 or particle.z < 0:
+            impact_sparks.remove(particle)
+
+    for enemy in enemies:
+        enemy.anim_time += dt
+        enemy.flash_timer = max(0, enemy.flash_timer - dt)
+        if not enemy.alive and enemy.death_timer > 0:
+            enemy.death_timer = max(0, enemy.death_timer - dt)
 
     muzzle_flash_timer = max(0, muzzle_flash_timer - dt)
     hit_marker_timer = max(0, hit_marker_timer - dt)
     screen_shake_timer = max(0, screen_shake_timer - dt)
+    damage_vignette_timer = max(0, damage_vignette_timer - dt)
 
 
 # ------------------------------------------------------------
@@ -293,11 +357,8 @@ def has_line_of_sight(x1, y1, x2, y2):
 def update_player(dt):
     keys = pygame.key.get_pressed()
 
-    # Forward/backward direction.
     forward_x = math.cos(player.angle)
     forward_y = math.sin(player.angle)
-
-    # Right/left direction is perpendicular to forward.
     right_x = -math.sin(player.angle)
     right_y = math.cos(player.angle)
 
@@ -307,48 +368,48 @@ def update_player(dt):
     if keys[pygame.K_w]:
         move_x += forward_x
         move_y += forward_y
-
     if keys[pygame.K_s]:
         move_x -= forward_x
         move_y -= forward_y
-
     if keys[pygame.K_d]:
         move_x += right_x
         move_y += right_y
-
     if keys[pygame.K_a]:
         move_x -= right_x
         move_y -= right_y
 
-    # Normalize diagonal movement so W+D isn't faster than W.
     length = math.hypot(move_x, move_y)
+    moving = length > 0
 
-    if length > 0:
+    if moving:
         move_x /= length
         move_y /= length
-
         new_x = player.x + move_x * MOVE_SPEED * dt
         new_y = player.y + move_y * MOVE_SPEED * dt
-
-        # Check X and Y separately so the player can slide along walls.
         if can_move_to(new_x, player.y):
             player.x = new_x
-
         if can_move_to(player.x, new_y):
             player.y = new_y
+        player.bob_time += dt * WEAPON_BOB_SPEED
+    else:
+        player.bob_time += dt * 2.0
 
-    # Keyboard turning.
     if keys[pygame.K_LEFT]:
         player.angle -= TURN_SPEED * dt
-
     if keys[pygame.K_RIGHT]:
         player.angle += TURN_SPEED * dt
 
-    # Mouse turning.
     mouse_x, _ = pygame.mouse.get_rel()
     player.angle += mouse_x * 0.0025
-
     player.angle = normalize_angle(player.angle)
+
+    # Gravity and jump physics.
+    if player.z > 0 or player.jump_velocity > 0:
+        player.z += player.jump_velocity * dt
+        player.jump_velocity -= GRAVITY * dt
+        if player.z <= 0:
+            player.z = 0
+            player.jump_velocity = 0
 
 
 # ------------------------------------------------------------
@@ -409,6 +470,11 @@ def shoot():
     player.shoot_cooldown = 0.35
     muzzle_flash_timer = 0.10
     screen_shake_timer = 0.08
+    shell_particles.append(
+        Particle(player.x, player.y, 0.8,
+                 random.uniform(0.4, 1.0), random.uniform(-0.8, 0.8),
+                 random.uniform(1.0, 2.0), 0.55, 0.05)
+    )
 
     best_enemy = None
     best_score = 999
@@ -433,16 +499,18 @@ def shoot():
 
     if best_enemy:
         best_enemy.health -= 50
+        best_enemy.flash_timer = 0.12
         hit_marker_timer = 0.18
 
-        # Blood spray on every successful hit.
-        spawn_blood(best_enemy.x, best_enemy.y, 14)
+        spawn_blood(best_enemy.x, best_enemy.y, 20)
+        spawn_sparks(best_enemy.x, best_enemy.y, 10)
 
         if best_enemy.health <= 0:
             best_enemy.alive = False
-
-            # Larger blood burst when the enemy dies.
-            spawn_blood(best_enemy.x, best_enemy.y, 32)
+            best_enemy.death_timer = 0.55
+            spawn_blood(best_enemy.x, best_enemy.y, 55)
+            spawn_sparks(best_enemy.x, best_enemy.y, 18)
+            screen_shake_timer = 0.16
 
 
 # ------------------------------------------------------------
@@ -481,6 +549,8 @@ def update_enemies(dt):
         if dist < 1.2 and enemy.attack_timer <= 0:
             player.health -= 10
             player.hurt_flash = 0.15
+            global damage_vignette_timer
+            damage_vignette_timer = 0.30
             enemy.attack_timer = 1.0
 
             if player.health <= 0:
@@ -517,51 +587,53 @@ def cast_ray(angle):
 
 
 def render_world():
-    # Sky.
-    view.fill((35, 35, 45))
-
-    # Floor.
-    pygame.draw.rect(
-        view,
-        (55, 45, 35),
-        (0, VIEW_HEIGHT // 2, VIEW_WIDTH, VIEW_HEIGHT // 2)
-    )
+    # Animated atmospheric sky and floor gradient.
+    for y in range(VIEW_HEIGHT):
+        if y < VIEW_HEIGHT // 2:
+            depth = y / max(1, VIEW_HEIGHT // 2)
+            c = int(22 + 18 * depth)
+            pygame.draw.line(view, (c, c, c + 10), (0, y), (VIEW_WIDTH, y))
+        else:
+            depth = (y - VIEW_HEIGHT // 2) / max(1, VIEW_HEIGHT // 2)
+            c = int(48 - 22 * depth)
+            pygame.draw.line(view, (c + 8, c, max(18, c - 6)),
+                             (0, y), (VIEW_WIDTH, y))
 
     wall_distances = []
 
     for column in range(VIEW_WIDTH):
-        # Convert screen X into an angle across the FOV.
         camera_x = column / VIEW_WIDTH
         ray_angle = player.angle - HALF_FOV + camera_x * FOV
-
         raw_distance = cast_ray(ray_angle)
-
-        # Fish-eye correction.
         corrected_distance = raw_distance * math.cos(
             normalize_angle(ray_angle - player.angle)
         )
-
         corrected_distance = max(corrected_distance, 0.001)
-
         wall_distances.append(corrected_distance)
 
-        # Calculate projected wall height.
         wall_height = int(VIEW_HEIGHT / corrected_distance)
+        jump_offset = int(player.z * 28)
+        top = VIEW_HEIGHT // 2 - wall_height // 2 - jump_offset
+        bottom = VIEW_HEIGHT // 2 + wall_height // 2 - jump_offset
 
-        top = VIEW_HEIGHT // 2 - wall_height // 2
-        bottom = VIEW_HEIGHT // 2 + wall_height // 2
-
-        # Simple distance shading.
-        shade = max(25, int(210 - corrected_distance * 12))
-
-        wall_color = (shade, shade, shade)
-
-        pygame.draw.line(
-            view,
-            wall_color,
-            (column, top),
-            (column, bottom)
+        shade = max(28, int(225 - corrected_distance * 11))
+        # Subtle animated industrial color variation.
+        stripe = 1 if (column // 9) % 2 else 0
+        wall_color = (
+            min(255, shade + 10 * stripe),
+            max(0, shade - 8),
+            max(0, shade - 15)
         )
+
+        pygame.draw.line(view, wall_color, (column, top), (column, bottom))
+
+        # Small wall highlights give surfaces more visual structure.
+        if column % 13 == 0 and corrected_distance < 12:
+            pygame.draw.line(
+                view,
+                (min(255, shade + 25), min(255, shade + 18), min(255, shade + 12)),
+                (column, top), (column, bottom), 1
+            )
 
     return wall_distances
 
@@ -571,25 +643,23 @@ def render_world():
 # ------------------------------------------------------------
 
 def render_enemies(wall_distances):
-    # Draw far-away enemies first.
     visible_enemies = []
 
     for enemy in enemies:
-        if not enemy.alive:
+        if not enemy.alive and enemy.death_timer <= 0:
             continue
 
         dx = enemy.x - player.x
         dy = enemy.y - player.y
-
         enemy_distance = math.hypot(dx, dy)
+        if enemy_distance < 0.1:
+            continue
+
         angle_to_enemy = math.atan2(dy, dx)
         relative_angle = normalize_angle(angle_to_enemy - player.angle)
 
-        # Only draw enemies inside the player's FOV.
         if abs(relative_angle) < HALF_FOV + 0.2:
-            visible_enemies.append(
-                (enemy_distance, enemy, relative_angle)
-            )
+            visible_enemies.append((enemy_distance, enemy, relative_angle))
 
     visible_enemies.sort(reverse=True, key=lambda item: item[0])
 
@@ -601,104 +671,121 @@ def render_enemies(wall_distances):
             / math.tan(HALF_FOV)
         )
 
-        sprite_height = int(VIEW_HEIGHT / enemy_distance * 0.75)
-        sprite_width = max(5, sprite_height // 2)
+        base_height = 1.15 if enemy.kind == "brute" else 0.95
+        anim = math.sin(enemy.anim_time * 6.0)
+        sprite_height = max(8, int(VIEW_HEIGHT / enemy_distance * base_height))
+        sprite_width = max(7, int(sprite_height * 0.58))
+        jump_offset = int(player.z * 28)
 
-        top = VIEW_HEIGHT // 2 - sprite_height // 2
+        # Death animation: sink and rotate visually by shrinking.
+        if not enemy.alive:
+            death_ratio = enemy.death_timer / 0.55
+            sprite_height = max(3, int(sprite_height * death_ratio))
+            sprite_width = max(3, int(sprite_width * death_ratio))
+            top = VIEW_HEIGHT // 2 - sprite_height + int((1 - death_ratio) * 12) - jump_offset
+        else:
+            bob = int(anim * max(1, sprite_height * 0.025))
+            top = VIEW_HEIGHT // 2 - sprite_height // 2 + bob - jump_offset
+
         left = int(screen_x - sprite_width / 2)
-
-        # Don't draw an enemy if a wall is closer at its screen column.
         sample_x = max(0, min(VIEW_WIDTH - 1, int(screen_x)))
 
         if enemy_distance > wall_distances[sample_x]:
             continue
 
-        # Body.
-        pygame.draw.rect(
-            view,
-            (130, 45, 35),
-            (left, top + sprite_height // 4,
-             sprite_width, sprite_height * 3 // 4)
+        # Shadow.
+        pygame.draw.ellipse(
+            view, (15, 10, 10),
+            (left, VIEW_HEIGHT // 2 + sprite_height // 2 - 2,
+             sprite_width, max(2, sprite_width // 4))
         )
+
+        # Enemy colors/types.
+        if enemy.kind == "brute":
+            body = (92, 35, 25)
+            head = (145, 90, 55)
+            accent = (255, 80, 35)
+        else:
+            body = (135, 38, 28)
+            head = (180, 112, 70)
+            accent = (255, 205, 45)
+
+        if enemy.flash_timer > 0:
+            body = (255, 235, 210)
+            head = (255, 255, 240)
+
+        body_top = top + sprite_height // 4
+        body_h = max(4, sprite_height * 3 // 4)
+
+        pygame.draw.ellipse(
+            view, body,
+            (left, body_top, sprite_width, body_h)
+        )
+
+        # Shoulders/arms.
+        arm_w = max(2, sprite_width // 4)
+        pygame.draw.rect(view, body,
+                         (left - arm_w // 2, body_top + body_h // 5, arm_w, body_h // 2))
+        pygame.draw.rect(view, body,
+                         (left + sprite_width - arm_w // 2, body_top + body_h // 5,
+                          arm_w, body_h // 2))
 
         # Head.
-        head_size = max(4, sprite_width // 2)
-        pygame.draw.rect(
-            view,
-            (185, 130, 85),
-            (int(screen_x - head_size / 2),
-             top,
-             head_size,
-             head_size)
+        head_w = max(5, int(sprite_width * 0.62))
+        head_h = max(5, int(sprite_height * 0.30))
+        head_x = int(screen_x - head_w / 2)
+        pygame.draw.ellipse(view, head,
+                            (head_x, top, head_w, head_h))
+
+        # Horns for brutes.
+        if enemy.kind == "brute":
+            pygame.draw.polygon(view, accent, [
+                (head_x + 1, top + 3),
+                (head_x - max(2, head_w // 5), top - max(3, head_h // 3)),
+                (head_x + head_w // 4, top + 5)
+            ])
+            pygame.draw.polygon(view, accent, [
+                (head_x + head_w - 1, top + 3),
+                (head_x + head_w + max(2, head_w // 5), top - max(3, head_h // 3)),
+                (head_x + head_w * 3 // 4, top + 5)
+            ])
+
+        # Eyes and mouth.
+        eye_y = top + head_h // 3
+        eye_w = max(2, head_w // 7)
+        for ex in (head_x + head_w // 4, head_x + head_w * 3 // 5):
+            pygame.draw.rect(view, accent, (ex, eye_y, eye_w, max(2, eye_w)))
+
+        pygame.draw.line(
+            view, (35, 10, 8),
+            (head_x + head_w // 3, top + head_h * 2 // 3),
+            (head_x + head_w * 2 // 3, top + head_h * 2 // 3),
+            max(1, head_w // 12)
         )
 
-        # Eyes.
-        eye_size = max(1, head_size // 6)
-
-        pygame.draw.rect(
-            view,
-            (255, 220, 40),
-            (int(screen_x - head_size * 0.28),
-             top + head_size // 3,
-             eye_size,
-             eye_size)
-        )
-
-        pygame.draw.rect(
-            view,
-            (255, 220, 40),
-            (int(screen_x + head_size * 0.12),
-             top + head_size // 3,
-             eye_size,
-             eye_size)
-        )
+        # Health bar when damaged.
+        if enemy.health < enemy.max_health and enemy.alive:
+            bar_w = sprite_width
+            bar_y = max(0, top - 5)
+            pygame.draw.rect(view, (25, 25, 25), (left, bar_y, bar_w, 3))
+            fill = int(bar_w * max(0, enemy.health) / enemy.max_health)
+            pygame.draw.rect(view, (210, 35, 30), (left, bar_y, fill, 3))
 
 
-def render_particles():
-    """Project blood particles into the first-person view."""
-    for particle in blood_particles:
+def render_shells():
+    for particle in shell_particles:
         dx = particle.x - player.x
         dy = particle.y - player.y
-        particle_distance = math.hypot(dx, dy)
-
-        if particle_distance < 0.1:
+        d = math.hypot(dx, dy)
+        if d < 0.1:
             continue
-
-        angle_to_particle = math.atan2(dy, dx)
-        relative_angle = normalize_angle(angle_to_particle - player.angle)
-
-        if abs(relative_angle) >= HALF_FOV:
+        rel = normalize_angle(math.atan2(dy, dx) - player.angle)
+        if abs(rel) >= HALF_FOV:
             continue
-
-        screen_x = (
-            VIEW_WIDTH / 2
-            + math.tan(relative_angle)
-            * (VIEW_WIDTH / 2)
-            / math.tan(HALF_FOV)
-        )
-
-        size = max(
-            1,
-            int(VIEW_HEIGHT / particle_distance * particle.size * 3)
-        )
-
-        screen_y = VIEW_HEIGHT // 2 - int(
-            particle.z / max(particle_distance, 0.1) * VIEW_HEIGHT
-        )
-
-        fade = particle.lifetime / particle.max_lifetime
-        color = (
-            int(150 + 80 * fade),
-            int(20 * fade),
-            int(15 * fade),
-        )
-
-        pygame.draw.circle(
-            view,
-            color,
-            (int(screen_x), int(screen_y)),
-            size
-        )
+        sx = VIEW_WIDTH / 2 + math.tan(rel) * (VIEW_WIDTH / 2) / math.tan(HALF_FOV)
+        sy = VIEW_HEIGHT // 2 - int(particle.z / d * VIEW_HEIGHT) - int(player.z * 28)
+        size = max(1, int(3 / d))
+        pygame.draw.rect(view, (205, 170, 55), (int(sx), int(sy), size + 1, size + 2))
 
 
 # ------------------------------------------------------------
@@ -706,54 +793,61 @@ def render_particles():
 # ------------------------------------------------------------
 
 def render_weapon():
-    # Bright muzzle flash appears briefly after every shot.
-    if muzzle_flash_timer > 0:
-        flash_size = 55 + int(muzzle_flash_timer * 180)
+    bob_x = int(math.sin(player.bob_time * 1.8) * 5)
+    bob_y = int(abs(math.cos(player.bob_time * 1.8)) * 4)
+    recoil = int(muzzle_flash_timer * 80)
+    center_x = WIDTH // 2 + bob_x
+    base_y = HEIGHT - 30 + bob_y + recoil
 
+    if muzzle_flash_timer > 0:
+        flash_size = 70 + int(muzzle_flash_timer * 220)
         pygame.draw.polygon(
-            screen,
-            (255, 220, 80),
+            screen, (255, 205, 60),
             [
-                (WIDTH // 2, HEIGHT - 150),
-                (WIDTH // 2 - flash_size // 2, HEIGHT - 35),
-                (WIDTH // 2 + flash_size // 2, HEIGHT - 35),
+                (center_x, base_y - 145),
+                (center_x - flash_size // 2, base_y - 35),
+                (center_x + flash_size // 2, base_y - 35),
             ],
         )
-
         pygame.draw.circle(
-            screen,
-            (255, 245, 180),
-            (WIDTH // 2, HEIGHT - 115),
-            max(5, flash_size // 5),
+            screen, (255, 245, 190),
+            (center_x, base_y - 115),
+            max(7, flash_size // 5)
         )
 
-    # Very simple homemade pistol silhouette.
-    center_x = WIDTH // 2
-    base_y = HEIGHT - 30
-
+    # More detailed homemade sci-fi pistol.
     pygame.draw.polygon(
-        screen,
-        (45, 45, 45),
+        screen, (28, 28, 32),
         [
-            (center_x - 35, base_y),
-            (center_x - 18, base_y - 90),
-            (center_x + 18, base_y - 90),
-            (center_x + 35, base_y),
+            (center_x - 48, base_y),
+            (center_x - 30, base_y - 105),
+            (center_x + 25, base_y - 105),
+            (center_x + 45, base_y),
         ]
     )
-
-    pygame.draw.rect(
-        screen,
-        (80, 80, 80),
-        (center_x - 12, base_y - 105, 24, 65)
+    pygame.draw.polygon(
+        screen, (75, 75, 82),
+        [
+            (center_x - 17, base_y - 120),
+            (center_x + 17, base_y - 120),
+            (center_x + 25, base_y - 58),
+            (center_x - 25, base_y - 58),
+        ]
     )
+    pygame.draw.rect(screen, (12, 12, 15),
+                     (center_x - 10, base_y - 140, 20, 30))
+    pygame.draw.rect(screen, (130, 130, 140),
+                     (center_x - 7, base_y - 136, 14, 8))
+    pygame.draw.line(screen, (150, 150, 160),
+                     (center_x - 25, base_y - 80),
+                     (center_x + 25, base_y - 80), 3)
 
-    # Muzzle.
-    pygame.draw.rect(
-        screen,
-        (15, 15, 15),
-        (center_x - 8, base_y - 120, 16, 20)
-    )
+    # Small animated weapon light.
+    glow = int(100 + 80 * (0.5 + 0.5 * math.sin(game_time * 8)))
+    pygame.draw.circle(screen, (glow, glow, 40),
+                       (center_x, base_y - 65), 4)
+
+    # Shell ejection is visual only.
 
 
 def render_hud():
@@ -916,12 +1010,16 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:
+                shoot()
+
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 running = False
 
-            elif event.key == pygame.K_SPACE:
-                shoot()
+            elif event.key == pygame.K_SPACE and player.z <= 0.001:
+                player.jump_velocity = JUMP_STRENGTH
 
             elif event.key == pygame.K_e:
                 result = use_action()
@@ -960,6 +1058,7 @@ while running:
     wall_distances = render_world()
     render_enemies(wall_distances)
     render_particles()
+    render_shells()
 
     # Scale the low-resolution 3-D view to the actual window.
     scaled_view = pygame.transform.scale(
@@ -984,7 +1083,7 @@ while running:
 
     # Instructions.
     instructions = font.render(
-        "WASD Move | Mouse/Arrows Turn | SPACE Shoot | E Use",
+        "WASD Move | Mouse/Arrows Turn | SPACE Jump | LMB Shoot | E Use",
         True,
         (220, 220, 220)
     )
@@ -994,11 +1093,16 @@ while running:
         (WIDTH // 2 - instructions.get_width() // 2, 5)
     )
 
-    # Red flash when damaged.
+    # Damage flash + subtle red vignette.
     if player.hurt_flash > 0:
         flash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        flash.fill((255, 0, 0, 70))
+        flash.fill((255, 0, 0, 80))
         screen.blit(flash, (0, 0))
+
+    if damage_vignette_timer > 0:
+        edge = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        pygame.draw.rect(edge, (180, 0, 0, 45), (0, 0, WIDTH, HEIGHT), 18)
+        screen.blit(edge, (0, 0))
 
     pygame.display.flip()
 
