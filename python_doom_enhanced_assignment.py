@@ -118,7 +118,7 @@ pygame.init()
 
 MUSIC_SAMPLE_RATE = 44100
 MUSIC_VOLUME = 0.24
-MUSIC_BPM = 125
+MUSIC_BPM = 105
 
 MUSIC_NOTE_FREQUENCIES = {
     "C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3,
@@ -266,18 +266,71 @@ def build_music_buffer(song, bpm):
     return samples.tobytes()
 
 
+def build_weapon_sound(kind):
+    """Generate an original short synthesized weapon sound effect."""
+    import array
+
+    profiles = {
+        "pistol": (0.12, 155.0, 0.55, 0.20),
+        "shotgun": (0.24, 85.0, 0.85, 0.55),
+        "chaingun": (0.075, 190.0, 0.45, 0.16),
+        "rocket": (0.38, 55.0, 1.00, 0.75),
+    }
+    duration, base_freq, tone_mix, noise_mix = profiles[kind]
+    samples = array.array("h")
+    count = max(1, int(MUSIC_SAMPLE_RATE * duration))
+
+    for i in range(count):
+        t = i / MUSIC_SAMPLE_RATE
+        progress = t / duration
+
+        # Fast attack followed by an exponential decay gives the sound a punch.
+        envelope = math.exp(-9.0 * progress)
+        if progress < 0.015:
+            envelope *= progress / 0.015
+
+        # A decaying noise component creates the mechanical/crackling character.
+        noise = random.uniform(-1.0, 1.0)
+        tone = (
+            math.sin(2.0 * math.pi * base_freq * t)
+            + 0.45 * math.sin(2.0 * math.pi * base_freq * 2.1 * t)
+            + 0.18 * math.sin(2.0 * math.pi * base_freq * 3.7 * t)
+        ) / 1.63
+
+        # Extra low thump for the shotgun and rocket launcher.
+        thump = 0.0
+        if kind in ("shotgun", "rocket"):
+            thump = math.sin(2.0 * math.pi * (base_freq * 0.38) * t) * math.exp(-18.0 * progress)
+
+        value = (tone * tone_mix + noise * noise_mix + thump * 0.35) * envelope
+        samples.append(int(max(-1.0, min(1.0, value * 0.85)) * 32767))
+
+    return pygame.mixer.Sound(buffer=samples.tobytes())
+
+
+def build_weapon_sounds():
+    """Create all four weapon effects after the mixer is initialized."""
+    return {
+        1: build_weapon_sound("pistol"),
+        2: build_weapon_sound("shotgun"),
+        3: build_weapon_sound("chaingun"),
+        4: build_weapon_sound("rocket"),
+    }
+
+
 def start_game_music():
     """Generate the guitar riff and start it looping during gameplay."""
     try:
         pygame.mixer.init(frequency=MUSIC_SAMPLE_RATE, size=-16, channels=1)
+        weapon_sounds = build_weapon_sounds()
         music_buffer = build_music_buffer(GUITAR_SONG, MUSIC_BPM)
         music_sound = pygame.mixer.Sound(buffer=music_buffer)
         music_sound.set_volume(1.0)
         music_sound.play(loops=-1)
-        return music_sound
+        return music_sound, weapon_sounds
     except pygame.error as error:
-        print(f"Music disabled: {error}")
-        return None
+        print(f"Audio disabled: {error}")
+        return None, {}
 
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -290,7 +343,7 @@ font = pygame.font.Font(None, 28)
 big_font = pygame.font.Font(None, 64)
 
 # Start the procedurally generated Drop-A guitar track.
-game_music = start_game_music()
+game_music, weapon_sounds = start_game_music()
 
 # ------------------------------------------------------------
 # 2. THE LEVEL
@@ -773,6 +826,13 @@ def shoot():
     player.shoot_cooldown = weapon["cooldown"]
     muzzle_flash_timer = 0.10
     screen_shake_timer = 0.08
+
+    # Play the synthesized sound for the selected weapon. The chaingun
+    # naturally repeats this effect as its automatic fire loop calls shoot().
+    sound = weapon_sounds.get(player.current_weapon)
+    if sound is not None:
+        sound.set_volume(0.42 if player.current_weapon != 4 else 0.55)
+        sound.play()
 
     shell_particles.append(
         Particle(player.x, player.y, 0.8,
