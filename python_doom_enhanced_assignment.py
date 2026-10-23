@@ -1,5 +1,5 @@
 """
-PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V13 VISUAL + ENEMY EXPANSION
+PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V14 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN
 -------------------------------------------
 A beginner-friendly, single-file FPS made with Pygame.
 
@@ -16,7 +16,7 @@ Controls:
     Mouse       Turn
     E           Open doors / use exit
     SPACE       Jump
-    Left Mouse  Shoot
+    Left Mouse  Shoot (hold for automatic chaingun fire)
     1           Pistol
     2           Shotgun
     3           Chaingun
@@ -33,7 +33,7 @@ import sys
 import pygame
 
 # ------------------------------------------------------------
-# WEEK 2 DECISION + WEEK 5 FUNCTION REFACTOR + V13 VISUAL + ENEMY EXPANSION
+# WEEK 2 DECISION + WEEK 5 FUNCTION REFACTOR + V14 VISUAL + ENEMY EXPANSION + AUTOMATIC CHAINGUN
 # This happens in the PowerShell window BEFORE the game opens.
 # ------------------------------------------------------------
 
@@ -105,7 +105,7 @@ WEAPON_BOB_SPEED = 9.0
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Python DOOM-Style FPS - Hell Sector v13")
+pygame.display.set_caption("Python DOOM-Style FPS - Hell Sector v14")
 
 view = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT))
 clock = pygame.time.Clock()
@@ -679,6 +679,16 @@ def shoot():
             spawn_sparks(enemy.x, enemy.y, 18)
 
     player.weapon_ammo[player.current_weapon] = player.ammo
+
+
+def handle_automatic_fire():
+    """Fire repeatedly while the left mouse button is held, but only for the chaingun."""
+    if player.current_weapon != 3:
+        return
+
+    mouse_buttons = pygame.mouse.get_pressed()
+    if mouse_buttons[0]:
+        shoot()
 
 
 # ------------------------------------------------------------
@@ -1436,6 +1446,10 @@ while running:
         0,
         player.shoot_cooldown - dt
     )
+
+    # Only the chaingun checks for a continuously held mouse button.
+    # The other weapons still require a fresh mouse click.
+    handle_automatic_fire()
 
     player.hurt_flash = max(
         0,
