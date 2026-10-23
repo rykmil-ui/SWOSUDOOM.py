@@ -34,18 +34,43 @@ import pygame
 # ------------------------------------------------------------
 fuel_remaining = 15
 
+# Week 3: a real three-outcome decision.
+# The selected strategy changes actual gameplay variables below.
 if fuel_remaining < 20:
     print("Warning: fuel critical.")
-    fight_back = input("Aliens are invading! Do you fight back? (y/n): ")
+    print("Choose your strategy:")
+    print("1 - Assault: more enemies, more ammunition, normal health")
+    print("2 - Tactical: balanced enemies, balanced ammunition, normal health")
+    print("3 - Escape: fewer enemies, less ammunition, reduced health")
 
-    if fight_back.lower() == "y":
-        print("You grab your weapon and fight back!")
-        print("Loading DOOM...")
+    strategy = input("Enter 1, 2, or 3: ").strip()
+
+    if strategy == "1":
+        game_strategy = "assault"
+        starting_ammo = 45
+        starting_health = 100
+        enemy_limit = 8
+        print("ASSAULT selected: prepare for a larger fight!")
+    elif strategy == "2":
+        game_strategy = "tactical"
+        starting_ammo = 30
+        starting_health = 100
+        enemy_limit = 6
+        print("TACTICAL selected: balanced resources and opposition.")
     else:
-        print("YOU DIED")
-        sys.exit()
+        game_strategy = "escape"
+        starting_ammo = 18
+        starting_health = 70
+        enemy_limit = 4
+        print("ESCAPE selected: fewer enemies, but limited health and ammunition.")
+
+    print("Loading DOOM...")
 else:
-    print("Fuel levels nominal.")
+    game_strategy = "tactical"
+    starting_ammo = 30
+    starting_health = 100
+    enemy_limit = 6
+    print("Fuel levels nominal. Tactical mode selected.")
 
 # ------------------------------------------------------------
 # 1. BASIC SETTINGS
@@ -124,8 +149,8 @@ class Player:
         # 0 means looking toward the positive X direction.
         self.angle = 0.0
 
-        self.health = 100
-        self.ammo = 25
+        self.health = starting_health
+        self.ammo = starting_ammo
         self.has_key = False
 
         self.shoot_cooldown = 0.0
@@ -172,6 +197,9 @@ enemies = [
     Enemy(6.5, 6.5, "imp"),
     Enemy(13.5, 2.5, "brute"),
 ]
+
+# The earlier decision changes the actual number of enemies loaded into the level.
+enemies = enemies[:enemy_limit]
 
 # ------------------------------------------------------------
 # VISUAL EFFECTS
@@ -916,6 +944,13 @@ def render_hud():
         True,
         (220, 220, 220)
     )
+
+    strategy_text = font.render(
+        f"MODE: {game_strategy.upper()}",
+        True,
+        (220, 220, 220)
+    )
+    screen.blit(strategy_text, (10, HEIGHT - 80))
 
     ammo_text = font.render(
         f"AMMO: {player.ammo}",
