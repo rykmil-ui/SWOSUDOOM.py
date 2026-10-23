@@ -118,7 +118,7 @@ pygame.init()
 
 MUSIC_SAMPLE_RATE = 44100
 MUSIC_VOLUME = 0.24
-MUSIC_BPM = 150
+MUSIC_BPM = 125
 
 MUSIC_NOTE_FREQUENCIES = {
     "C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3,
