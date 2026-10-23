@@ -1,5 +1,5 @@
 """
-PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V12 WEAPON ARSENAL
+PYTHON DOOM-STYLE FPS - ONE ORIGINAL LEVEL - V13 VISUAL + ENEMY EXPANSION
 -------------------------------------------
 A beginner-friendly, single-file FPS made with Pygame.
 
@@ -33,7 +33,7 @@ import sys
 import pygame
 
 # ------------------------------------------------------------
-# WEEK 2 DECISION + WEEK 5 FUNCTION REFACTOR + V12 WEAPON ARSENAL
+# WEEK 2 DECISION + WEEK 5 FUNCTION REFACTOR + V13 VISUAL + ENEMY EXPANSION
 # This happens in the PowerShell window BEFORE the game opens.
 # ------------------------------------------------------------
 
@@ -105,7 +105,7 @@ WEAPON_BOB_SPEED = 9.0
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Python DOOM-Style FPS - Retro Enhanced Level")
+pygame.display.set_caption("Python DOOM-Style FPS - Hell Sector v13")
 
 view = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT))
 clock = pygame.time.Clock()
@@ -206,7 +206,15 @@ class Enemy:
         self.x = x
         self.y = y
         self.kind = kind
-        self.max_health = 100 if kind == "imp" else 140
+
+        # Each demon class has its own role and durability.
+        enemy_stats = {
+            "imp": (100, 10),
+            "brute": (140, 15),
+            "hellhound": (80, 12),
+            "warden": (190, 22),
+        }
+        self.max_health, self.threat_value = enemy_stats.get(kind, (100, 10))
         self.health = self.max_health
         self.attack_timer = random.uniform(0.2, 1.0)
         self.alive = True
@@ -225,13 +233,13 @@ def validate_enemy_positions():
 
 enemies = [
     Enemy(12.5, 2.5, "imp"),
-    Enemy(10.5, 3.5, "imp"),
+    Enemy(10.5, 3.5, "hellhound"),
     Enemy(10.5, 6.5, "brute"),
+    Enemy(13.5, 3.5, "warden"),
     Enemy(5.5, 9.5, "imp"),
     Enemy(8.5, 9.5, "brute"),
-    Enemy(12.5, 9.5, "imp"),
-    Enemy(6.5, 6.5, "imp"),
-    Enemy(13.5, 2.5, "brute"),
+    Enemy(6.5, 6.5, "hellhound"),
+    Enemy(13.5, 2.5, "warden"),
 ]
 
 # The earlier decision changes the actual number of enemies loaded into the level.
@@ -701,7 +709,7 @@ def update_enemies(dt):
         # contributes less pressure, so the accumulated state changes during
         # combat as well as when demons are removed from the list of living
         # enemies.
-        demon_weight = 15 if enemy.kind == "brute" else 10
+        demon_weight = enemy.threat_value
         health_ratio = max(0.0, enemy.health / enemy.max_health)
         pulse_pressure += int(demon_weight * health_ratio)
         threat_total += demon_weight
@@ -712,13 +720,39 @@ def update_enemies(dt):
         dy = player.y - enemy.y
         dist = math.hypot(dx, dy)
 
-        # Enemies move toward the player if reasonably close.
-        if dist < 8 and dist > 1.0:
+        # Each demon class behaves differently.
+        if enemy.kind == "hellhound":
+            # Fast melee hunter: closes distance quickly and attacks hard.
+            speed = 1.55
+            attack_range = 1.05
+            attack_damage = 14
+            attack_delay = 0.65
+            chase_range = 10.0
+        elif enemy.kind == "warden":
+            # Slow armored guardian: can attack from farther away.
+            speed = 0.45
+            attack_range = 5.5
+            attack_damage = 8
+            attack_delay = 1.35
+            chase_range = 9.0
+        elif enemy.kind == "brute":
+            speed = 0.65
+            attack_range = 1.25
+            attack_damage = 12
+            attack_delay = 0.9
+            chase_range = 8.0
+        else:
+            speed = 0.8
+            attack_range = 1.2
+            attack_damage = 10
+            attack_delay = 1.0
+            chase_range = 8.0
+
+        # Move toward the player when the demon's behavior allows it.
+        if dist < chase_range and dist > attack_range:
             if has_line_of_sight(enemy.x, enemy.y, player.x, player.y):
                 direction_x = dx / dist
                 direction_y = dy / dist
-
-                speed = 0.8
 
                 new_x = enemy.x + direction_x * speed * dt
                 new_y = enemy.y + direction_y * speed * dt
@@ -729,15 +763,22 @@ def update_enemies(dt):
                 if not is_blocking(enemy.x, new_y):
                     enemy.y = new_y
 
-        # Attack when close enough.
-        if dist < 1.2 and enemy.attack_timer <= 0:
-            player.health -= 10
+        # Hell Warden has a ranged attack; the other enemies use melee.
+        if enemy.kind == "warden" and dist < attack_range and enemy.attack_timer <= 0:
+            if has_line_of_sight(enemy.x, enemy.y, player.x, player.y):
+                player.health -= attack_damage
+                player.hurt_flash = 0.15
+                damage_vignette_timer = 0.30
+                spawn_sparks(player.x, player.y, 10)
+                enemy.attack_timer = attack_delay
+        elif enemy.kind != "warden" and dist < attack_range and enemy.attack_timer <= 0:
+            player.health -= attack_damage
             player.hurt_flash = 0.15
             damage_vignette_timer = 0.30
-            enemy.attack_timer = 1.0
+            enemy.attack_timer = attack_delay
 
-            if player.health <= 0:
-                player.health = 0
+        if player.health <= 0:
+            player.health = 0
 
     # Hell pressure is a persistent state that follows the current demon
     # population. It eases down as demons are damaged or destroyed.
@@ -878,7 +919,18 @@ def render_world():
     glow = int(10 + 8 * (0.5 + 0.5 * math.sin(game_time * 3.5)))
     overlay = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT), pygame.SRCALPHA)
     pygame.draw.circle(overlay, (120, 35, 20, glow), (VIEW_WIDTH // 2, horizon), 35)
+
+    # Pulsing Hell lights in the center of the view.
+    pulse = int(8 + 12 * (0.5 + 0.5 * math.sin(game_time * 4.2)))
+    pygame.draw.circle(overlay, (180, 30, 12, pulse), (VIEW_WIDTH // 2, horizon + 12), 28)
     view.blit(overlay, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+    # Dark edge vignette keeps the focus in the center of the screen.
+    vignette = pygame.Surface((VIEW_WIDTH, VIEW_HEIGHT), pygame.SRCALPHA)
+    for edge in range(18, 0, -2):
+        alpha = max(2, 26 - edge)
+        pygame.draw.rect(vignette, (0, 0, 0, alpha), (edge, edge, VIEW_WIDTH - edge * 2, VIEW_HEIGHT - edge * 2), 2)
+    view.blit(vignette, (0, 0))
 
     return wall_distances
 
@@ -945,11 +997,19 @@ def render_enemies(wall_distances):
              sprite_width, max(2, sprite_width // 4))
         )
 
-        # Enemy colors/types.
+        # Enemy-specific silhouettes. Each enemy has a distinct visual role.
         if enemy.kind == "brute":
             body = (92, 35, 25)
             head = (145, 90, 55)
             accent = (255, 80, 35)
+        elif enemy.kind == "hellhound":
+            body = (75, 20, 18)
+            head = (150, 38, 25)
+            accent = (255, 105, 25)
+        elif enemy.kind == "warden":
+            body = (42, 48, 55)
+            head = (75, 82, 92)
+            accent = (90, 220, 255)
         else:
             body = (135, 38, 28)
             head = (180, 112, 70)
@@ -962,51 +1022,75 @@ def render_enemies(wall_distances):
         body_top = top + sprite_height // 4
         body_h = max(4, sprite_height * 3 // 4)
 
-        pygame.draw.ellipse(
-            view, body,
-            (left, body_top, sprite_width, body_h)
-        )
+        if enemy.kind == "hellhound":
+            # Low quadruped silhouette with animated legs.
+            body_rect = (left, body_top + body_h // 5, sprite_width, max(4, body_h // 2))
+            pygame.draw.ellipse(view, body, body_rect)
+            leg_h = max(3, body_h // 3)
+            stride = int(anim * max(1, sprite_width // 8))
+            for lx in (left + sprite_width // 6, left + sprite_width * 4 // 6):
+                pygame.draw.rect(view, body, (lx, body_top + body_h // 2, max(2, sprite_width // 7), leg_h + stride))
+                pygame.draw.rect(view, body, (lx + sprite_width // 5, body_top + body_h // 2, max(2, sprite_width // 7), leg_h - stride))
+            head_w = max(5, int(sprite_width * 0.55))
+            head_h = max(5, int(sprite_height * 0.24))
+            head_x = int(screen_x - head_w / 2)
+            pygame.draw.ellipse(view, head, (head_x, top + sprite_height // 8, head_w, head_h))
+            pygame.draw.polygon(view, accent, [(head_x + 2, top + 5), (head_x - 2, top - 2), (head_x + 7, top + 5)])
+            pygame.draw.polygon(view, accent, [(head_x + head_w - 2, top + 5), (head_x + head_w + 2, top - 2), (head_x + head_w - 7, top + 5)])
+        elif enemy.kind == "warden":
+            # Tall armored guardian with glowing cyan core.
+            pygame.draw.rect(view, body, (left + sprite_width // 8, body_top, max(3, sprite_width * 3 // 4), body_h))
+            pygame.draw.rect(view, (25, 28, 34), (left, body_top + body_h // 4, max(3, sprite_width // 5), body_h // 2))
+            pygame.draw.rect(view, (25, 28, 34), (left + sprite_width * 4 // 5, body_top + body_h // 4, max(3, sprite_width // 5), body_h // 2))
+            head_w = max(5, int(sprite_width * 0.65))
+            head_h = max(5, int(sprite_height * 0.27))
+            head_x = int(screen_x - head_w / 2)
+            pygame.draw.rect(view, head, (head_x, top, head_w, head_h))
+            pygame.draw.line(view, accent, (head_x + 2, top + head_h // 2), (head_x + head_w - 2, top + head_h // 2), max(1, head_h // 5))
+            core = max(2, int(sprite_width * 0.16))
+            pygame.draw.circle(view, accent, (int(screen_x), body_top + body_h // 3), core)
+            pygame.draw.polygon(view, (105, 115, 125), [(head_x, top + 3), (head_x - max(2, head_w // 5), top - max(2, head_h // 3)), (head_x + 3, top + 4)])
+            pygame.draw.polygon(view, (105, 115, 125), [(head_x + head_w, top + 3), (head_x + head_w + max(2, head_w // 5), top - max(2, head_h // 3)), (head_x + head_w - 3, top + 4)])
+        else:
+            pygame.draw.ellipse(view, body, (left, body_top, sprite_width, body_h))
+            arm_w = max(2, sprite_width // 4)
+            pygame.draw.rect(view, body, (left - arm_w // 2, body_top + body_h // 5, arm_w, body_h // 2))
+            pygame.draw.rect(view, body, (left + sprite_width - arm_w // 2, body_top + body_h // 5, arm_w, body_h // 2))
+            head_w = max(5, int(sprite_width * 0.62))
+            head_h = max(5, int(sprite_height * 0.30))
+            head_x = int(screen_x - head_w / 2)
+            pygame.draw.ellipse(view, head, (head_x, top, head_w, head_h))
 
-        # Shoulders/arms.
-        arm_w = max(2, sprite_width // 4)
-        pygame.draw.rect(view, body,
-                         (left - arm_w // 2, body_top + body_h // 5, arm_w, body_h // 2))
-        pygame.draw.rect(view, body,
-                         (left + sprite_width - arm_w // 2, body_top + body_h // 5,
-                          arm_w, body_h // 2))
+            if enemy.kind == "brute":
+                pygame.draw.polygon(view, accent, [
+                    (head_x + 1, top + 3),
+                    (head_x - max(2, head_w // 5), top - max(3, head_h // 3)),
+                    (head_x + head_w // 4, top + 5)
+                ])
+                pygame.draw.polygon(view, accent, [
+                    (head_x + head_w - 1, top + 3),
+                    (head_x + head_w + max(2, head_w // 5), top - max(3, head_h // 3)),
+                    (head_x + head_w * 3 // 4, top + 5)
+                ])
 
-        # Head.
-        head_w = max(5, int(sprite_width * 0.62))
-        head_h = max(5, int(sprite_height * 0.30))
-        head_x = int(screen_x - head_w / 2)
-        pygame.draw.ellipse(view, head,
-                            (head_x, top, head_w, head_h))
+        # Eyes / visor.
+        eye_y = top + max(2, int(sprite_height * 0.10))
+        eye_w = max(2, sprite_width // 9)
+        if enemy.kind == "warden":
+            pygame.draw.rect(view, accent, (int(screen_x - eye_w * 2), eye_y, eye_w * 4, max(2, eye_w)))
+        elif enemy.kind != "hellhound":
+            for ex in (head_x + head_w // 4, head_x + head_w * 3 // 5):
+                pygame.draw.rect(view, accent, (ex, eye_y, eye_w, max(2, eye_w)))
+        else:
+            pygame.draw.rect(view, accent, (int(screen_x - eye_w * 2), eye_y + 1, eye_w * 4, max(2, eye_w)))
 
-        # Horns for brutes.
-        if enemy.kind == "brute":
-            pygame.draw.polygon(view, accent, [
-                (head_x + 1, top + 3),
-                (head_x - max(2, head_w // 5), top - max(3, head_h // 3)),
-                (head_x + head_w // 4, top + 5)
-            ])
-            pygame.draw.polygon(view, accent, [
-                (head_x + head_w - 1, top + 3),
-                (head_x + head_w + max(2, head_w // 5), top - max(3, head_h // 3)),
-                (head_x + head_w * 3 // 4, top + 5)
-            ])
-
-        # Eyes and mouth.
-        eye_y = top + head_h // 3
-        eye_w = max(2, head_w // 7)
-        for ex in (head_x + head_w // 4, head_x + head_w * 3 // 5):
-            pygame.draw.rect(view, accent, (ex, eye_y, eye_w, max(2, eye_w)))
-
-        pygame.draw.line(
-            view, (35, 10, 8),
-            (head_x + head_w // 3, top + head_h * 2 // 3),
-            (head_x + head_w * 2 // 3, top + head_h * 2 // 3),
-            max(1, head_w // 12)
-        )
+        # Mouth/teeth for organic demons.
+        if enemy.kind in ("imp", "brute", "hellhound"):
+            mouth_y = top + int(sprite_height * 0.22)
+            pygame.draw.line(view, (35, 10, 8), (int(screen_x - sprite_width * 0.18), mouth_y), (int(screen_x + sprite_width * 0.18), mouth_y), max(1, sprite_width // 12))
+            if enemy.kind == "hellhound":
+                for tooth_x in (-0.12, -0.04, 0.04, 0.12):
+                    pygame.draw.polygon(view, (235, 225, 185), [(int(screen_x + sprite_width * tooth_x), mouth_y), (int(screen_x + sprite_width * tooth_x + 2), mouth_y), (int(screen_x + sprite_width * tooth_x + 1), mouth_y + max(2, sprite_height // 16))])
 
         # Health bar when damaged.
         if enemy.health < enemy.max_health and enemy.alive:
@@ -1161,6 +1245,7 @@ def render_hud():
     enemy_text = font.render(f"ENEMIES: {living_enemies}", True, (220, 220, 220))
     threat_text = font.render(f"THREAT: {total_enemy_threat}", True, (220, 220, 220))
     hell_text = font.render(f"HELLWAVE: {hell_pressure}", True, (220, 120, 80))
+    enemy_types = font.render("I:IMP  B:BRUTE  H:HOUND  W:WARDEN", True, (155, 155, 165))
 
     screen.blit(health_text, (15, HEIGHT - 58))
     screen.blit(ammo_text, (215, HEIGHT - 58))
@@ -1169,6 +1254,7 @@ def render_hud():
     screen.blit(enemy_text, (615, HEIGHT - 58))
     screen.blit(threat_text, (615, HEIGHT - 32))
     screen.blit(hell_text, (615, HEIGHT - 12))
+    screen.blit(enemy_types, (15, HEIGHT - 12))
 
     # Health/ammo mini-bars make the HUD feel more game-like.
     pygame.draw.rect(screen, (35, 35, 38), (15, HEIGHT - 30, 160, 6))
